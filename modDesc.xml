@@ -1,15 +1,45 @@
 <?xml version="1.0" encoding="utf-8" standalone="no" ?>
 <modDesc descVersion="110">
     <author>SimGamerJen</author>
-    <version>0.1.3.3</version>
+    <version>0.1.9.1</version>
     <title>
         <en>Helper Payroll Alpha</en>
     </title>
     <description>
-        <en>Alpha build: replaces vanilla AI helper wage deductions with configurable helper rates, minimum charges, helper-slot ledger tracking, and optional daily payroll.</en>
+        <en>Alpha release candidate: configurable AI helper payroll with a HelperProfiles-style role list overlay, semicolon role cycling, vanilla role-type mode, persistent payroll ledger, console/export reports, and a basic in-game payroll report overlay.</en>
     </description>
     <iconFilename>HelperPayroll_icon.dds</iconFilename>
-    <multiplayer supported="true" />
+    <multiplayer supported="false" />
+
+    <l10n>
+        <text name="input_HELPERPAYROLL_CYCLE_ROLE">
+            <en>Helper Payroll: Cycle Role</en>
+        </text>
+        <text name="input_HELPERPAYROLL_TOGGLE_ROLE_LIST">
+            <en>Helper Payroll: Toggle Role List</en>
+        </text>
+        <text name="input_HELPERPAYROLL_TOGGLE_REPORT_OVERLAY">
+            <en>Helper Payroll: Toggle Report Overlay</en>
+        </text>
+    </l10n>
+
+    <actions>
+        <action name="HELPERPAYROLL_CYCLE_ROLE" category="ONFOOT VEHICLE" axisType="HALF" />
+        <action name="HELPERPAYROLL_TOGGLE_ROLE_LIST" category="ONFOOT VEHICLE" axisType="HALF" />
+        <action name="HELPERPAYROLL_TOGGLE_REPORT_OVERLAY" category="ONFOOT VEHICLE" axisType="HALF" />
+    </actions>
+
+    <inputBinding>
+        <actionBinding action="HELPERPAYROLL_CYCLE_ROLE">
+            <binding device="KB_MOUSE_DEFAULT" input="KEY_semicolon" />
+        </actionBinding>
+        <actionBinding action="HELPERPAYROLL_TOGGLE_ROLE_LIST">
+            <binding device="KB_MOUSE_DEFAULT" input="KEY_rctrl KEY_semicolon" />
+        </actionBinding>
+        <actionBinding action="HELPERPAYROLL_TOGGLE_REPORT_OVERLAY">
+            <binding device="KB_MOUSE_DEFAULT" input="KEY_rctrl KEY_p" />
+        </actionBinding>
+    </inputBinding>
 
     <extraSourceFiles>
         <sourceFile filename="scripts/HelperPayroll.lua" />

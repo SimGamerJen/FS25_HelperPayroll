@@ -1,51 +1,171 @@
 # FS25_HelperPayroll
 
-**Helper Payroll** is an early alpha Farming Simulator 25 mod that replaces the vanilla AI helper wage drain with a configurable payroll model.
+**Helper Payroll** is an alpha Farming Simulator 25 mod that replaces the vanilla AI helper wage drain with a configurable payroll model.
 
-Instead of letting the game charge its built-in AI helper rate continuously, Helper Payroll suppresses the vanilla helper price and applies its own helper wage calculation using hourly rates, minimum charges, optional call-out fees, helper-slot mappings, and optional daily payroll.
+Instead of letting the game charge its built-in AI helper rate continuously, HelperPayroll suppresses supported vanilla AI helper wage calculations and applies configurable role-based worker costs, minimum charges, optional call-out fees, and optional daily payroll.
 
 ## Alpha status
 
-This is an **alpha/test build**. It has been tested against native AI fieldwork jobs, including mowing with the standard AI worker system. It is not yet a polished ModHub-ready release.
-
-Current build: **0.1.3.3-alpha**  
+Current build: **0.1.9.1 Alpha RC**  
 FS25 modDesc: **110**
 
-## What it does now
+This is a GitHub alpha release candidate. The standalone vanilla `roleType` workflow has been tested with native AI fieldwork jobs. Multiplayer and dedicated-server behaviour are intentionally not declared as supported in this alpha.
 
-- Suppresses the vanilla AI helper wage calculation for supported AI jobs.
-- Detects active AI fieldwork jobs.
-- Tracks helper job duration.
-- Applies configurable hourly helper wages.
-- Supports a minimum charge per job or per daily payroll row, depending on billing mode.
-- Supports optional call-out fees.
-- Supports two billing modes:
-  - `onJobFinish`
-  - `dailyPayroll`
-- Maintains session and daily ledger summaries in the log.
-- Provides helper-slot mapping structure for future HelperProfiles integration.
-- Includes UK Tenant Farm and US Ranch example rate profiles.
+## Tested vanilla workflow
 
-## What it does not do yet
+```text
+Open role list with RCTRL + ;
+Cycle payroll role with ;
+Start an AI worker
+Vanilla helper slot is detected but ignored for payroll in roleType mode
+Selected role/rate is billed when the worker finishes
+Payroll entry is written to the persistent ledger
+Payroll can be reviewed through the report overlay or console report commands
+```
 
-- It does not yet automatically detect named helpers from FS25_HelperProfiles.
-- It does not yet provide an in-game payroll UI.
-- It does not yet persist/export the payroll ledger to a savegame XML file.
-- It does not change contract rewards.
-- It does not include a contract rate-card system.
-- It has primarily been tested with `AIJobFieldWork`; other AI job categories may need further testing.
+## Features in this alpha
 
-## Installation
+- Suppresses vanilla AI helper wage calculation for supported AI jobs.
+- Tracks native AI fieldwork jobs and elapsed work time.
+- Default vanilla-friendly `roleType` payroll mode.
+- Advanced `helperSlot` mode for A-J helper-slot/named-helper mapping.
+- HelperProfiles-style role list overlay.
+- In-game payroll report overlay.
+- Persistent per-savegame settings.
+- Persistent payroll ledger with lightweight `index.xml` and period files such as `Y001_M06.xml`.
+- Console commands for role control, overlay layout, report review, and report export.
+- Configurable hourly rates, minimum worker charge, call-out fee, and billing mode.
+- Supports `onJobFinish` and `dailyPayroll` billing modes.
+- Generic default rates plus example UK Tenant Farm and US Ranch profiles.
 
-1. Download `FS25_HelperPayroll_v0_1_3_3_alpha.zip`.
-2. Place the ZIP in your Farming Simulator 25 mods folder.
-3. Enable **Helper Payroll Alpha** in the save's mod selection screen.
-4. Start a save and hire an AI worker.
-5. Check `log.txt` for `[HelperPayroll]` entries.
+## Default controls
+
+```text
+;           Cycle payroll role / next report page when the report overlay is open
+RCTRL + ;   Open/close payroll role list
+RCTRL + P   Open/close payroll report overlay
+```
+
+The active/highlighted role is the selected role. There is no Enter/confirm step. The selected role applies to new AI helper jobs started after the role is changed. Existing active jobs keep the role they were assigned when they started.
+
+## Payroll report overlay
+
+The report overlay is read-only and intentionally lightweight for alpha. It has four pages:
+
+```text
+1. Summary
+2. Current period
+3. Recent jobs
+4. Role totals
+```
+
+Use `RCTRL + P` to open/close it and `;` to cycle pages while it is open.
+
+## Console commands
+
+```text
+hpayOverlay help
+hpayOverlay on|off|toggle|status
+hpayOverlay pos <x> <y>
+hpayOverlay anchor TL|TR|BL|BR
+hpayOverlay scale <0.5..2.0>
+hpayOverlay width <0.15..0.90>
+hpayOverlay opacity <0..1>
+hpayOverlay font <0.010..0.030>
+hpayOverlay rowgap <0.001..0.03>
+hpayOverlay maxrows <3..30>
+hpayOverlay pad <0..0.05>
+hpayOverlay bg on|off
+hpayOverlay outline on|off
+hpayOverlay shadow on|off
+hpayOverlay debounce <ms>
+hpayOverlay reset
+
+hpayRole help
+hpayRole show
+hpayRole list
+hpayRole next
+hpayRole prev
+hpayRole set <roleId|index|name>
+
+hpayReport help
+hpayReport summary
+hpayReport session
+hpayReport jobs [limit]
+hpayReport month <year> <month>
+hpayReport roles
+hpayReport daily
+hpayReport export <name>
+hpayReport exportSession <name>
+
+hpayDump status
+hpayDump roles
+hpayDump ledger
+hpayDump report
+```
+
+## Payroll modes
+
+### `roleType` — recommended vanilla mode
+
+This is the default public alpha mode.
+
+The vanilla game may randomly assign helper slots A-J, but HelperPayroll does **not** use that random slot to decide pay. All new AI jobs use the selected payroll role:
+
+```xml
+<payrollMode>roleType</payrollMode>
+<selectedRole>standard</selectedRole>
+```
+
+Example:
+
+```text
+[HelperPayroll] AI job detected #1: ... payrollMode=roleType helperSlot=G helperSlotUsedForPayroll=false helper=Trainee Helper workerRate=trainee rate=10.00
+```
+
+### `helperSlot` — advanced / HelperProfiles-friendly mode
+
+This mode uses the vanilla helper slot detected from the AI job:
+
+```xml
+<payrollMode>helperSlot</payrollMode>
+```
+
+Example mapping:
+
+```text
+helperIndex=1  -> helperSlot=A
+helperIndex=2  -> helperSlot=B
+helperIndex=10 -> helperSlot=J
+```
+
+This can align with **FS25_HelperProfiles** without a hard dependency. HelperProfiles can control the visual helper slot while HelperPayroll bills the same slot using the configured payroll entry.
+
+## Persistent settings
+
+Per-save settings are stored in:
+
+```text
+modSettings/FS25_HelperPayroll/<savegame>/helperPayrollSettings.xml
+```
+
+This stores selected role, payroll mode/profile, fallback role, role selector debounce, and overlay layout settings.
+
+## Persistent payroll ledger
+
+Payroll history is stored per savegame in a split ledger structure:
+
+```text
+modSettings/FS25_HelperPayroll/<savegame>/ledger/
+    index.xml
+    Y001_M06.xml
+```
+
+`index.xml` stores fast summaries. Period files such as `Y001_M06.xml` store detailed job/payment rows. The mod loads the index and current period during normal startup; older periods are loaded on demand by report commands.
 
 ## Configuration
 
-Configuration is stored in:
+Default configuration is stored in:
 
 ```text
 config/defaultPayrollConfig.xml
@@ -54,114 +174,83 @@ config/defaultPayrollConfig.xml
 Key settings:
 
 ```xml
-<defaultProfile>uk_tenant</defaultProfile>
-<defaultWorker>skilled</defaultWorker>
-<defaultHelperSlot></defaultHelperSlot>
+<activePayrollProfile>default</activePayrollProfile>
+<payrollMode>roleType</payrollMode>
+<selectedRole>standard</selectedRole>
+<fallbackRole>standard</fallbackRole>
 <chargeCustomWorkerCosts>true</chargeCustomWorkerCosts>
 <billingMode>onJobFinish</billingMode>
 <payrollHour>18</payrollHour>
 <minimumWorkerCharge>5.00</minimumWorkerCharge>
 <workerCalloutFee>0.00</workerCalloutFee>
 <roundWorkerCharges>true</roundWorkerCharges>
-<logLevel>debug</logLevel>
+<logLevel>normal</logLevel>
+<helperProfilesDiagnostics>false</helperProfilesDiagnostics>
 ```
 
-### Billing modes
+HelperPayroll does **not** define currency, area units, or distance units. It uses the savegame/game display settings.
 
-#### `onJobFinish`
+## Billing modes
+
+### `onJobFinish`
 
 The helper is charged when the AI job ends.
 
-Example:
-
 ```text
-Helper works 0.205 hours at £18/hour = £3.68
-Minimum charge = £5.00
-Applied charge = £5.00
+Helper works 0.205 hours at 18/hour = 3.69
+Minimum charge = 5.00
+Applied charge = 5.00
 ```
 
-#### `dailyPayroll`
+### `dailyPayroll`
 
 The helper's work is added to the daily ledger. Payroll is applied once at or after the configured `payrollHour`.
-
-Example:
 
 ```xml
 <billingMode>dailyPayroll</billingMode>
 <payrollHour>18</payrollHour>
 ```
 
-The helper works during the day, the job is deferred to payroll, and the farm is charged at 18:00 game time.
+## Alpha limitations
 
-## Helper slots
+- Primary alpha path is vanilla `roleType` mode.
+- `helperSlot` mode exists for advanced testing but is not the main alpha workflow.
+- Payroll reports are command/overlay based; there is no full mouse-driven payroll management UI yet.
+- Historical browsing is intentionally lightweight and paged.
+- Multiplayer/dedicated server behaviour is not supported in this alpha package.
+- Broad testing is still needed beyond native `AIJobFieldWork`.
+- Contract reward/rate-card behaviour is intentionally out of scope for this mod.
 
-The alpha contains helper-slot mapping data, but it does not yet automatically connect to FS25_HelperProfiles.
+## Installation
 
-Example UK profile:
+1. Download the ZIP from the GitHub alpha release.
+2. Place the ZIP in your Farming Simulator 25 mods folder.
+3. Enable **Helper Payroll Alpha** in the save's mod selection screen.
+4. Start a save and hire an AI worker.
+5. Check the in-game report overlay or `log.txt` for `[HelperPayroll]` entries.
 
-```xml
-<helperSlots profile="uk_tenant">
-    <helper slot="A" name="Marty" role="Farm Manager" workerRate="manager" />
-    <helper slot="B" name="Rhys" role="Skilled Operator" workerRate="skilled" />
-    <helper slot="C" name="Ellie" role="General Farmhand" workerRate="casual" />
-    <helper slot="D" name="Graham" role="Contractor" workerRate="contractor" />
-</helperSlots>
-```
-
-For manual testing, set:
-
-```xml
-<defaultHelperSlot>B</defaultHelperSlot>
-```
-
-This will make jobs resolve to slot B, Rhys, using the configured skilled operator rate.
-
-## Financial impact
-
-Helper Payroll does affect the save's money balance.
-
-It suppresses the vanilla AI helper cost and then applies its own charge using the game's money system with `MoneyType.AI`. Any money charged by the mod remains part of the save's financial history. Removing the mod later will not refund previous payroll charges.
-
-The mod does not add required vehicles, placeables, fillTypes, animals, or map objects.
-
-## Tested behaviour
-
-Confirmed in testing:
-
-- Native AI fieldwork/mowing detected as `AIJobFieldWork`.
-- Vanilla helper price detected as `0.0005` per millisecond.
-- The mod returns `0` to suppress the vanilla helper charge.
-- `onJobFinish` billing applies correctly.
-- `dailyPayroll` defers correctly and applies payroll at the configured hour.
-- Minimum charge applies correctly.
-- Session and daily ledger logs update correctly.
-
-## Recommended alpha testing checklist
-
-- Start a single-player test save.
-- Enable Helper Payroll Alpha.
-- Hire an AI worker for fieldwork.
-- Confirm vanilla helper wages do not drain continuously.
-- Confirm `[HelperPayroll] AI helper pricing suppressed` appears in the log.
-- Test `onJobFinish` mode.
-- Test `dailyPayroll` mode by advancing game time to the payroll hour.
-- Test a manual `defaultHelperSlot` value, such as `B`.
+Do not use GitHub's green **Code** button unless you want the source files.
 
 ## Compatibility notes
 
-- Designed to coexist with FS25_HelperProfiles, but automatic integration is not implemented yet.
-- Multiplayer is declared as supported, but the alpha should be treated as unverified for serious multiplayer saves until dedicated testing is completed.
-- Other mods that override AI job pricing may conflict.
+### FS25_HelperProfiles
 
-## Roadmap
+HelperPayroll does not require HelperProfiles.
 
-Planned next steps:
+If `payrollMode=helperSlot`, HelperPayroll can align with HelperProfiles through the vanilla helper slot system. For standalone vanilla use, keep `payrollMode=roleType`.
 
-1. HelperProfiles bridge diagnostics.
-2. Automatic helper-slot detection.
-3. Named helper payroll.
-4. Persistent savegame payroll ledger.
-5. Optional in-game payroll summary UI.
-6. Wider AI job type testing.
+### AvatarSwitcher
 
-Contract reward realism is now intended to become a separate future mod, likely `FS25_ContractRateCard`.
+HelperPayroll does not require AvatarSwitcher. If HelperProfiles uses AvatarSwitcher for worker appearance, HelperPayroll remains separate and only cares about payroll identity/rate mapping.
+
+## Recommended alpha test checklist
+
+- First-run load with no existing ledger.
+- Existing-save load with a populated ledger.
+- Role list open/close.
+- Role cycling and selected-role persistence.
+- Short job below minimum charge.
+- Longer job exceeding minimum charge.
+- Report overlay page cycling.
+- `hpayReport summary` and `hpayReport jobs 10`.
+- `hpayReport export <name>`.
