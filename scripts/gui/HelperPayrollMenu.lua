@@ -7,9 +7,9 @@ HelperPayrollMenu = {}
 
 local HelperPayrollMenu_mt = Class(HelperPayrollMenu, ScreenElement)
 
-local TAB_TEXTS = {"OVERVIEW", "BILLING", "ROLES", "LEDGER", "HELP"}
-local TAB_TOPICS = {"overview", "billing", "roles", "ledger", "help"}
-local TOPIC_INDEX = {overview=1, billing=2, roles=3, ledger=4, help=5}
+local TAB_TEXTS = {"OVERVIEW", "BILLING", "ROLES", "WORKERS", "LEDGER", "HELP"}
+local TAB_TOPICS = {"overview", "billing", "roles", "workers", "ledger", "help"}
+local TOPIC_INDEX = {overview=1, billing=2, roles=3, workers=4, ledger=5, help=6}
 
 local function fmtMoney(v)
     return string.format("%.2f", tonumber(v or 0) or 0)
@@ -40,6 +40,7 @@ function HelperPayrollMenu.new(target, customMt)
     self.selectedRow = nil
     self.draftSettings = {}
     self.draftRates = {}
+    self.draftMappings = {}
     self.stagedDirty = false
     self.suppressTabCallback = false
     self.suppressOptionCallback = false
@@ -143,6 +144,7 @@ function HelperPayrollMenu:refreshDraftFromRuntime()
     local hp = HelperPayroll
     self.draftSettings = {}
     self.draftRates = {}
+    self.draftMappings = {}
     if hp ~= nil and hp.settings ~= nil then
         self.draftSettings.billingMode = hp.settings.billingMode or "onJobFinish"
         self.draftSettings.payrollHour = tonumber(hp.settings.payrollHour) or 18
@@ -158,6 +160,14 @@ function HelperPayrollMenu:refreshDraftFromRuntime()
     if hp ~= nil and hp.workerRates ~= nil and hp.workerRates[profileId] ~= nil then
         for roleId, worker in pairs(hp.workerRates[profileId]) do
             self.draftRates[roleId] = tonumber(worker.hourlyRate) or 0
+        end
+    end
+    if hp ~= nil then
+        for index = 1, 10 do
+            local slot = string.char(string.byte("A") + index - 1)
+            local slotInfo = hp.getHelperProfilesSlotInfo ~= nil and hp:getHelperProfilesSlotInfo(slot) or nil
+            local roleId = hp.getEffectiveHelperProfilesRole ~= nil and select(1, hp:getEffectiveHelperProfilesRole(slotInfo, slot, profileId)) or (hp.settings.fallbackRole or "standard")
+            self.draftMappings[slot] = roleId
         end
     end
     self.stagedDirty = false
@@ -225,11 +235,12 @@ function HelperPayrollMenu:buildRows()
 
     if topic == "billing" then
         rows = {
-            {id="billingMode", label="Billing mode", value=tostring(self.draftSettings.billingMode or "onJobFinish"), status="Editable", source="Savegame", editType="option", options={"onJobFinish", "dailyPayroll"}, info="Choose whether helper charges are applied when each job finishes, or deferred into the daily payroll run."},
-            {id="payrollHour", label="Payroll hour", value=fmtHour(self.draftSettings.payrollHour), status="Editable", source="Savegame", editType="number", step=1, min=0, max=23, info="In dailyPayroll mode, payroll is applied at this in-game hour."},
-            {id="minimumWorkerCharge", label="Minimum charge", value=fmtMoney(self.draftSettings.minimumWorkerCharge), status="Editable", source="Savegame", editType="number", step=0.5, min=0, max=999, info="Minimum charge applied to a completed helper job after labour and callout are calculated."},
-            {id="workerCalloutFee", label="Callout fee", value=fmtMoney(self.draftSettings.workerCalloutFee), status="Editable", source="Savegame", editType="number", step=0.5, min=0, max=999, info="Flat callout fee added to each charged helper job."},
-            {id="roundWorkerCharges", label="Round charges", value=boolText(self.draftSettings.roundWorkerCharges), status="Editable", source="Savegame", editType="option", options={"false", "true"}, info="Round helper charges to whole currency units when applied."},
+            {id="payrollMode", label="Payroll mode", value=tostring(self.draftSettings.payrollMode or "roleType"), status="Editable", source="Savegame", editType="option", options={"roleType", "helperSlot"}, info="roleType assigns every new job to the selected payroll role. helperSlot uses the deployed A-J worker, with live HelperProfiles identity data when available."},
+            {id="billingMode", label="Billing mode", value=tostring(self.draftSettings.billingMode or "onJobFinish"), status="Editable", source="Savegame", editType="option", options={"onJobFinish", "dailyPayroll"}, info="onJobFinish charges each completed job immediately. dailyPayroll aggregates each worker's completed work for the game day and settles it through payroll."},
+            {id="payrollHour", label="Payroll hour", value=fmtHour(self.draftSettings.payrollHour), status="Editable", source="Savegame", editType="number", step=1, min=0, max=23, info="In dailyPayroll mode, pending rows settle at this in-game hour. Any unpaid row from an earlier game day is treated as overdue and settles automatically."},
+            {id="minimumWorkerCharge", label="Minimum charge", value=fmtMoney(self.draftSettings.minimumWorkerCharge), status="Editable", source="Savegame", editType="number", step=0.5, min=0, max=999, info="Minimum charge after labour and callout: per job in onJobFinish mode, or once per worker and workday in dailyPayroll mode."},
+            {id="workerCalloutFee", label="Callout fee", value=fmtMoney(self.draftSettings.workerCalloutFee), status="Editable", source="Savegame", editType="number", step=0.5, min=0, max=999, info="Flat callout fee: per job in onJobFinish mode, or once per worker and workday in dailyPayroll mode."},
+            {id="roundWorkerCharges", label="Round charges", value=boolText(self.draftSettings.roundWorkerCharges), status="Editable", source="Savegame", editType="option", options={"false", "true"}, info="Round applied helper charges to the nearest currency cent."},
         }
     elseif topic == "roles" then
         local order = hp ~= nil and hp.getWorkerRateOrder ~= nil and hp:getWorkerRateOrder(profileId) or {}
@@ -239,6 +250,37 @@ function HelperPayrollMenu:buildRows()
             local rate = self.draftRates[roleId]
             if rate == nil and worker ~= nil then rate = tonumber(worker.hourlyRate) or 0 end
             table.insert(rows, {id="rate:"..tostring(roleId), roleId=roleId, label=tostring(name), value=fmtMoney(rate).."/hr", status=(roleId == self.draftSettings.selectedRole and "Selected" or "Editable"), source=tostring(profileId), editType="number", step=1, min=0, max=999, info="Hourly rate for worker role '"..tostring(roleId).."'."})
+        end
+    elseif topic == "workers" then
+        local roleOrder = hp ~= nil and hp.getWorkerRateOrder ~= nil and hp:getWorkerRateOrder(profileId) or {}
+        if roleOrder == nil or #roleOrder == 0 then
+            roleOrder = {tostring(hp ~= nil and hp.settings ~= nil and hp.settings.fallbackRole or "standard")}
+        end
+        for index = 1, 10 do
+            local slot = string.char(string.byte("A") + index - 1)
+            local slotInfo = hp ~= nil and hp.getHelperProfilesSlotInfo ~= nil and hp:getHelperProfilesSlotInfo(slot) or nil
+            local displayName = slotInfo ~= nil and slotInfo.displayName or ("Helper " .. slot)
+            local identityId = slotInfo ~= nil and slotInfo.identityId or ("slot:" .. slot)
+            local identitySource = slotInfo ~= nil and slotInfo.identitySource or "slotFallback"
+            local selected = slotInfo ~= nil and slotInfo.selected == true
+            local inUse = slotInfo ~= nil and slotInfo.inUse == true
+            local status = selected and "Selected" or (inUse and "In use" or "Idle")
+            local roleId = self.draftMappings[slot] or tostring(hp ~= nil and hp.settings ~= nil and hp.settings.fallbackRole or "standard")
+            local worker = hp ~= nil and hp.getWorkerRateById ~= nil and hp:getWorkerRateById(profileId, roleId) or nil
+            local roleName = worker ~= nil and worker.name or roleId
+            local rate = worker ~= nil and tonumber(worker.hourlyRate) or 0
+            table.insert(rows, {
+                id="worker:" .. slot,
+                mappingSlot=slot,
+                identityId=identityId,
+                label=string.format("%s - %s", slot, tostring(displayName)),
+                value=string.format("%s (%.2f/hr)", tostring(roleName), tonumber(rate) or 0),
+                status=status,
+                source=slotInfo ~= nil and "HelperProfiles API" or "Slot fallback",
+                editType="option",
+                options=roleOrder,
+                info=string.format("Identity: %s | Identity source: %s | Assign a HelperPayroll role to this worker. Mappings are stored in the current save.", tostring(identityId), tostring(identitySource))
+            })
         end
     elseif topic == "ledger" then
         local index = hp ~= nil and hp.ledger ~= nil and hp.ledger.index or nil
@@ -267,15 +309,23 @@ function HelperPayrollMenu:buildBodyText()
             roleName = workerName or roleId or roleName
             rate = tonumber(hourlyRate) or 0
         end
-        return string.format("Profile: %s\nPayroll mode: %s\nBilling mode: %s\nSelected role: %s (%.2f/hr)\nMinimum charge: %.2f\nCallout fee: %.2f\nPolicy config: %s\n\nUse the tabs to review billing settings, role rates, and ledger totals.", tostring(hp and hp.settings and hp.settings.activePayrollProfile or "-"), tostring(hp and hp.settings and hp.settings.payrollMode or "-"), tostring(hp and hp.settings and hp.settings.billingMode or "-"), tostring(roleName), tonumber(rate) or 0, tonumber(hp and hp.settings and hp.settings.minimumWorkerCharge or 0) or 0, tonumber(hp and hp.settings and hp.settings.workerCalloutFee or 0) or 0, tostring(hp and hp.CONFIG_FILE or "-"))
+        local hpStatus = hp ~= nil and hp.getHelperProfilesStatus ~= nil and hp:getHelperProfilesStatus() or nil
+        local integration = "Standalone"
+        if hpStatus ~= nil and hpStatus.available == true then
+            integration = string.format("Connected (API v%s)", tostring(hpStatus.apiVersion or "?"))
+        elseif hpStatus ~= nil and hpStatus.modLoaded == true then
+            integration = "Loaded (API unavailable)"
+        end
+        local pendingRows = hp ~= nil and hp.countPendingDailyPayrollRows ~= nil and hp:countPendingDailyPayrollRows() or 0
+        return string.format("Profile: %s\nPayroll mode: %s\nBilling mode: %s\nSelected role: %s (%.2f/hr)\nMinimum charge: %.2f\nCallout fee: %.2f\nHelperProfiles: %s\nPending payroll rows: %d\nCurrent-save settings: %s\n\nUse BILLING for payroll policy, ROLES for rates, WORKERS for named-worker mappings, and LEDGER for accumulated history.", tostring(hp and hp.settings and hp.settings.activePayrollProfile or "-"), tostring(hp and hp.settings and hp.settings.payrollMode or "-"), tostring(hp and hp.settings and hp.settings.billingMode or "-"), tostring(roleName), tonumber(rate) or 0, tonumber(hp and hp.settings and hp.settings.minimumWorkerCharge or 0) or 0, tonumber(hp and hp.settings and hp.settings.workerCalloutFee or 0) or 0, tostring(integration), tonumber(pendingRows) or 0, tostring(hp and hp.persistence and hp.persistence.filePath or "-"))
     elseif topic == "help" then
-        return "HelperPayroll Management\n\nThis screen uses the same FS25-style ScreenElement, tab row, SmoothList table, and details panel technique used by CropControlOverride.\n\nBilling and role-rate changes are staged in this menu. Press APPLY to write the current save payroll settings. Press DISCARD to reload values from the current runtime config.\n\nThis is the first CCO-style management UI pass; deeper role/profile editing can be expanded once this foundation is approved."
+        return "HelperPayroll Management\n\nChanges are staged until APPLY is pressed. APPLY writes gameplay settings to the current save only; it does not overwrite the global default policy. DISCARD restores the currently loaded values.\n\nroleType is the standalone mode and uses the selected payroll role. helperSlot uses the deployed A-J worker and can consume live HelperProfiles identity data without creating a required dependency.\n\nDaily payroll aggregates completed work by worker and game day. Pending rows persist across reloads and settle at the configured payroll hour or when they become overdue."
     end
     return ""
 end
 
 function HelperPayrollMenu:updateContent()
-    local tableVisible = self.currentTopic == "billing" or self.currentTopic == "roles" or self.currentTopic == "ledger"
+    local tableVisible = self.currentTopic == "billing" or self.currentTopic == "roles" or self.currentTopic == "workers" or self.currentTopic == "ledger"
     self:setVisibleSafe(self.tableContainer, tableVisible)
     self:setVisibleSafe(self.bodyTextElement, not tableVisible)
     self:setTextSafe(self.bodyTextElement, self:buildBodyText())
@@ -334,11 +384,13 @@ end
 
 function HelperPayrollMenu:getDraftValue(row)
     if row == nil then return nil end
+    if row.id == "payrollMode" then return self.draftSettings.payrollMode end
     if row.id == "billingMode" then return self.draftSettings.billingMode end
     if row.id == "payrollHour" then return self.draftSettings.payrollHour end
     if row.id == "minimumWorkerCharge" then return self.draftSettings.minimumWorkerCharge end
     if row.id == "workerCalloutFee" then return self.draftSettings.workerCalloutFee end
     if row.id == "roundWorkerCharges" then return self.draftSettings.roundWorkerCharges end
+    if row.mappingSlot ~= nil then return self.draftMappings[row.mappingSlot] end
     if row.roleId ~= nil then return self.draftRates[row.roleId] end
     return row.value
 end
@@ -348,6 +400,13 @@ function HelperPayrollMenu:formatDraftValue(row)
     if row == nil then return "-" end
     if row.id == "roundWorkerCharges" then return boolText(v == true or tostring(v) == "true") end
     if row.id == "payrollHour" then return fmtHour(v) end
+    if row.mappingSlot ~= nil then
+        local profileId = self.draftSettings.activePayrollProfile or "default"
+        local worker = HelperPayroll ~= nil and HelperPayroll.getWorkerRateById ~= nil and HelperPayroll:getWorkerRateById(profileId, tostring(v or "")) or nil
+        local roleName = worker ~= nil and worker.name or tostring(v or "-")
+        local rate = worker ~= nil and tonumber(worker.hourlyRate) or 0
+        return string.format("%s (%.2f/hr)", tostring(roleName), tonumber(rate) or 0)
+    end
     if row.id == "minimumWorkerCharge" or row.id == "workerCalloutFee" or row.roleId ~= nil then return fmtMoney(v) .. (row.roleId ~= nil and "/hr" or "") end
     return tostring(v or "-")
 end
@@ -368,11 +427,13 @@ end
 
 function HelperPayrollMenu:setDraftValue(row, value)
     if row == nil then return end
-    if row.id == "billingMode" then self.draftSettings.billingMode = tostring(value)
+    if row.id == "payrollMode" then self.draftSettings.payrollMode = tostring(value)
+    elseif row.id == "billingMode" then self.draftSettings.billingMode = tostring(value)
     elseif row.id == "payrollHour" then self.draftSettings.payrollHour = tonumber(value) or 0
     elseif row.id == "minimumWorkerCharge" then self.draftSettings.minimumWorkerCharge = tonumber(value) or 0
     elseif row.id == "workerCalloutFee" then self.draftSettings.workerCalloutFee = tonumber(value) or 0
     elseif row.id == "roundWorkerCharges" then self.draftSettings.roundWorkerCharges = (value == true or tostring(value) == "true")
+    elseif row.mappingSlot ~= nil then self.draftMappings[row.mappingSlot] = tostring(value or "standard")
     elseif row.roleId ~= nil then self.draftRates[row.roleId] = tonumber(value) or 0 end
     self.stagedDirty = true
     self:buildRows()
@@ -465,7 +526,7 @@ end
 
 function HelperPayrollMenu:onClickApply()
     if HelperPayroll ~= nil and HelperPayroll.applyManagementDraft ~= nil then
-        local ok = HelperPayroll:applyManagementDraft(self.draftSettings, self.draftRates, "gui")
+        local ok = HelperPayroll:applyManagementDraft(self.draftSettings, self.draftRates, self.draftMappings, "gui")
         if ok then
             self:refreshDraftFromRuntime()
             self:showTopic(self.currentTopic)
@@ -492,6 +553,10 @@ function HelperPayrollMenu:onClickReset()
         -- Reset this save's active payroll settings from the global/default policy template.
         -- The global modSettings/defaultPayrollConfig.xml is not modified by this UI action.
         HelperPayroll:loadConfig()
+        HelperPayroll.helperProfilesMappings = {}
+        if HelperPayroll.rebuildHelperProfilesMappingIndexes ~= nil then
+            HelperPayroll:rebuildHelperProfilesMappingIndexes()
+        end
         if HelperPayroll.saveSavegameSettings ~= nil then
             HelperPayroll:saveSavegameSettings("gui-reset-save-from-policy")
         end
@@ -516,6 +581,7 @@ end
 function HelperPayrollMenu:onClickOverview() self:showTopic("overview") end
 function HelperPayrollMenu:onClickBilling() self:showTopic("billing") end
 function HelperPayrollMenu:onClickRoles() self:showTopic("roles") end
+function HelperPayrollMenu:onClickWorkers() self:showTopic("workers") end
 function HelperPayrollMenu:onClickLedger() self:showTopic("ledger") end
 function HelperPayrollMenu:onClickHelp() self:showTopic("help") end
 

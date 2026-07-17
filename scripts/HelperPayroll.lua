@@ -1,5 +1,5 @@
 -- Helper Payroll
--- Version: 0.2.3.6-alpha
+-- Version: 0.3.3.0-beta-rc
 -- Purpose:
 --   1. Suppress vanilla AI worker payments.
 --   2. Track active AI jobs.
@@ -14,6 +14,8 @@ local hpGetTimeMs
 
 HelperPayroll = {}
 HelperPayroll.MOD_NAME = g_currentModName or "FS25_HelperPayroll"
+HelperPayroll.VERSION = "0.3.3.0"
+HelperPayroll.RELEASE_CHANNEL = "beta-rc"
 HelperPayroll.MOD_DIRECTORY = g_currentModDirectory or ""
 HelperPayroll.BUNDLED_CONFIG_FILE = HelperPayroll.MOD_DIRECTORY .. "config/defaultPayrollConfig.xml"
 HelperPayroll.CONFIG_FILE = HelperPayroll.BUNDLED_CONFIG_FILE
@@ -45,6 +47,9 @@ HelperPayroll.workerRates = {}
 HelperPayroll.workerRateOrder = {}
 HelperPayroll.helperSlots = {}
 HelperPayroll.helperSlotCounts = {}
+HelperPayroll.helperProfilesMappings = {}
+HelperPayroll.helperProfilesMappingsByIdentity = {}
+HelperPayroll.helperProfilesMappingsBySlot = {}
 HelperPayroll.originalFarmAddMoney = nil
 HelperPayroll.aiWorkerHooksInstalled = false
 HelperPayroll.aiPriceDebugCount = 0
@@ -61,11 +66,25 @@ HelperPayroll.workerLedgerCount = 0
 HelperPayroll.workerLedgerTotal = 0
 HelperPayroll.workerDailyLedger = {}
 HelperPayroll.payrollCheckAccumulatorMs = 0
-HelperPayroll.payrollCheckIntervalMs = 30000
+HelperPayroll.payrollCheckIntervalMs = 5000
+HelperPayroll.lastPayrollClockDay = nil
+HelperPayroll.lastPayrollClockHour = nil
+HelperPayroll.lastPayrollClockDayTime = nil
 HelperPayroll.warnedMissingPayrollClock = false
+HelperPayroll.startupStatusElapsedMs = 0
+HelperPayroll.startupStatusDelayMs = 1500
+HelperPayroll.startupStatusLogged = false
 HelperPayroll.helperProfilesGlobalScanDone = false
 HelperPayroll.helperProfilesJobDiagnosticCount = 0
 HelperPayroll.helperProfilesJobDiagnosticLimit = 6
+HelperPayroll.helperProfilesBridge = {
+    modLoaded = false,
+    apiAvailable = false,
+    apiVersion = nil,
+    modVersion = nil,
+    detectionSource = "none",
+    source = "none"
+}
 HelperPayroll.actionEventIds = {}
 HelperPayroll.roleFlashText = nil
 HelperPayroll.roleFlashTime = 0
@@ -127,6 +146,11 @@ end
 
 local function rcWarn(message, ...)
     print(string.format("[HelperPayroll][WARN] " .. tostring(message), ...))
+end
+
+function HelperPayroll:isDetailedDiagnosticsEnabled()
+    local level = string.lower(tostring(self.settings ~= nil and self.settings.logLevel or "normal"))
+    return level == "debug" or level == "trace"
 end
 
 local function getXmlBoolOrDefault(xmlFile, key, default)
@@ -465,9 +489,10 @@ function HelperPayroll:saveExternalPolicyConfigFromRuntime(reason)
     return false
 end
 
-function HelperPayroll:applyManagementDraft(draftSettings, draftRates, reason)
+function HelperPayroll:applyManagementDraft(draftSettings, draftRates, draftMappings, reason)
     draftSettings = draftSettings or {}
     draftRates = draftRates or {}
+    draftMappings = draftMappings or {}
     self.settings.billingMode = tostring(draftSettings.billingMode or self.settings.billingMode or 'onJobFinish')
     self.settings.payrollHour = math.floor(tonumber(draftSettings.payrollHour or self.settings.payrollHour) or 18)
     self.settings.minimumWorkerCharge = tonumber(draftSettings.minimumWorkerCharge or self.settings.minimumWorkerCharge) or 0
@@ -484,6 +509,10 @@ function HelperPayroll:applyManagementDraft(draftSettings, draftRates, reason)
                 self.workerRates[profileId][roleId].hourlyRate = tonumber(rate) or 0
             end
         end
+    end
+    for slot, roleId in pairs(draftMappings) do
+        local hpSlotInfo = self:getHelperProfilesSlotInfo(slot)
+        self:setHelperProfilesPayrollMapping(hpSlotInfo, slot, roleId)
     end
     local ok = self:saveSavegameSettings(reason or 'management-ui')
     if ok then
@@ -916,6 +945,14 @@ function HelperPayroll:handleRoleInput(actionLabel, offset, actionName, inputVal
         return
     end
 
+    -- HelperProfiles owns the semicolon key family when it is enabled.
+    -- HelperPayroll keeps these standalone role controls only when running
+    -- without HelperProfiles. This also prevents the report overlay from
+    -- consuming semicolon while the HelperProfiles selector is active.
+    if self:shouldSuppressStandaloneRoleInputs() then
+        return
+    end
+
     -- When the report overlay is open, semicolon pages the report instead of
     -- changing the selected payroll role. Modifier chords are still ignored so
     -- RCTRL+semicolon / RCTRL+P do not trigger the plain-cycle action beneath.
@@ -1010,6 +1047,10 @@ end
 
 function HelperPayroll:onInputToggleRoleList(actionName, inputValue, callbackState, isAnalog)
     if not hpIsInputPress(inputValue, callbackState) then
+        return
+    end
+
+    if self:shouldSuppressStandaloneRoleInputs() then
         return
     end
 
@@ -1462,8 +1503,17 @@ function HelperPayroll:registerGlobalPlayerInputActions()
         end
     end
 
-    registerOne("_playerCycleRoleActionEventId", InputAction.HELPERPAYROLL_CYCLE_ROLE, self.onInputCycleRole, "HELPERPAYROLL_CYCLE_ROLE")
-    registerOne("_playerToggleRoleListActionEventId", InputAction.HELPERPAYROLL_TOGGLE_ROLE_LIST, self.onInputToggleRoleList, "HELPERPAYROLL_TOGGLE_ROLE_LIST")
+    local suppressStandaloneRoleInputs = self:shouldSuppressStandaloneRoleInputs()
+    if suppressStandaloneRoleInputs then
+        self.roleListVisible = false
+        if not self._loggedStandaloneRoleInputSuppressionPlayer then
+            rcLog("Standalone role selector inputs suppressed: context=player reason=HelperProfiles-loaded semicolonOwner=HelperProfiles")
+            self._loggedStandaloneRoleInputSuppressionPlayer = true
+        end
+    else
+        registerOne("_playerCycleRoleActionEventId", InputAction.HELPERPAYROLL_CYCLE_ROLE, self.onInputCycleRole, "HELPERPAYROLL_CYCLE_ROLE")
+        registerOne("_playerToggleRoleListActionEventId", InputAction.HELPERPAYROLL_TOGGLE_ROLE_LIST, self.onInputToggleRoleList, "HELPERPAYROLL_TOGGLE_ROLE_LIST")
+    end
     registerOne("_playerToggleReportOverlayActionEventId", InputAction.HELPERPAYROLL_TOGGLE_REPORT_OVERLAY, self.onInputToggleReportOverlay, "HELPERPAYROLL_TOGGLE_REPORT_OVERLAY")
     registerOne("_playerToggleManagementMenuActionEventId", InputAction.HELPERPAYROLL_TOGGLE_MANAGEMENT_MENU, self.onInputToggleManagementMenu, "HELPERPAYROLL_TOGGLE_MANAGEMENT_MENU")
 
@@ -1526,8 +1576,17 @@ function HelperPayroll:registerVehicleInputActions(vehicle, isActiveForInput)
         end
     end
 
-    addOne(InputAction.HELPERPAYROLL_CYCLE_ROLE, self.onInputCycleRole, "HELPERPAYROLL_CYCLE_ROLE")
-    addOne(InputAction.HELPERPAYROLL_TOGGLE_ROLE_LIST, self.onInputToggleRoleList, "HELPERPAYROLL_TOGGLE_ROLE_LIST")
+    local suppressStandaloneRoleInputs = self:shouldSuppressStandaloneRoleInputs()
+    if suppressStandaloneRoleInputs then
+        self.roleListVisible = false
+        if not self._loggedStandaloneRoleInputSuppressionVehicle then
+            rcLog("Standalone role selector inputs suppressed: context=vehicle reason=HelperProfiles-loaded semicolonOwner=HelperProfiles")
+            self._loggedStandaloneRoleInputSuppressionVehicle = true
+        end
+    else
+        addOne(InputAction.HELPERPAYROLL_CYCLE_ROLE, self.onInputCycleRole, "HELPERPAYROLL_CYCLE_ROLE")
+        addOne(InputAction.HELPERPAYROLL_TOGGLE_ROLE_LIST, self.onInputToggleRoleList, "HELPERPAYROLL_TOGGLE_ROLE_LIST")
+    end
     addOne(InputAction.HELPERPAYROLL_TOGGLE_REPORT_OVERLAY, self.onInputToggleReportOverlay, "HELPERPAYROLL_TOGGLE_REPORT_OVERLAY")
     addOne(InputAction.HELPERPAYROLL_TOGGLE_MANAGEMENT_MENU, self.onInputToggleManagementMenu, "HELPERPAYROLL_TOGGLE_MANAGEMENT_MENU")
 end
@@ -1799,28 +1858,330 @@ function HelperPayroll:isRoleTypePayrollMode()
     return mode == "roletype" or mode == "selectedrole" or mode == "defaultrole"
 end
 
+-- ===== HelperProfiles integration helpers ==================================
+
+-- The standalone role selector deliberately uses the same semicolon family as
+-- HelperProfiles. When HelperProfiles is loaded, it owns those controls and
+-- HelperPayroll does not register/respond to its vanilla role cycle/list actions.
+-- Report and management shortcuts remain available.
+function HelperPayroll:shouldSuppressStandaloneRoleInputs()
+    if self.isHelperProfilesModLoaded == nil then
+        return false
+    end
+
+    local ok, modLoaded = pcall(self.isHelperProfilesModLoaded, self)
+    return ok and modLoaded == true
+end
+
+-- HelperProfiles integration is optional. HelperPayroll detects the enabled
+-- mod through the engine and consumes a read-only API published on the shared
+-- current mission. No HelperProfiles file is used as proof that the mod is
+-- active, avoiding stale save-slot data from previous saves.
+function HelperPayroll:isHelperProfilesModLoaded()
+    local names = {
+        "FS25_HelperProfiles",
+        "HelperProfiles"
+    }
+
+    if type(g_modIsLoaded) == "table" then
+        for _, name in ipairs(names) do
+            if g_modIsLoaded[name] == true then
+                return true, "g_modIsLoaded"
+            end
+        end
+    end
+
+    if g_modManager ~= nil then
+        if type(g_modManager.getModByName) == "function" then
+            for _, name in ipairs(names) do
+                local ok, mod = pcall(g_modManager.getModByName, g_modManager, name)
+                if ok and mod ~= nil then
+                    if mod.isLoaded == true or mod.isActive == true or mod.isSelected == true then
+                        return true, "g_modManager"
+                    end
+                end
+            end
+        end
+
+        local mods = g_modManager.mods
+        if type(mods) == "table" then
+            for _, mod in pairs(mods) do
+                if type(mod) == "table" then
+                    local name = tostring(mod.modName or mod.name or mod.id or "")
+                    if name == "FS25_HelperProfiles" or name == "HelperProfiles" then
+                        if mod.isLoaded == true or mod.isActive == true or mod.isSelected == true then
+                            return true, "g_modManager.mods"
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    local api = self:getHelperProfilesAPI(false)
+    if api ~= nil then
+        return true, "shared-api"
+    end
+
+    return false, "none"
+end
+
+function HelperPayroll:getHelperProfilesAPI(validateVersion)
+    local mission = g_currentMission
+    if mission == nil then return nil end
+
+    local api = mission.fs25HelperProfilesAPI or mission.helperProfilesAPI
+    if type(api) ~= "table" then return nil end
+
+    if validateVersion ~= false then
+        local version = tonumber(api.apiVersion)
+        if version == nil or version < 1 then
+            return nil
+        end
+    end
+
+    return api
+end
+
+function HelperPayroll:callHelperProfilesAPI(methodName, ...)
+    local api = self:getHelperProfilesAPI(true)
+    if api == nil then
+        return false, nil, "api-unavailable"
+    end
+
+    local fn = api[methodName]
+    if type(fn) ~= "function" then
+        return false, nil, "method-unavailable"
+    end
+
+    local ok, result = pcall(fn, api, ...)
+    if not ok then
+        rcWarn("HelperProfiles API call failed: method=%s error=%s", tostring(methodName), tostring(result))
+        return false, nil, tostring(result)
+    end
+
+    return true, result, nil
+end
+
+function HelperPayroll:isHelperProfilesAvailable()
+    local modLoaded = self:isHelperProfilesModLoaded()
+    return modLoaded == true and self:getHelperProfilesAPI(true) ~= nil
+end
+
+function HelperPayroll:slotToHelperProfilesIndex(slot)
+    if slot == nil then return nil end
+    local s = string.upper(tostring(slot or ""))
+    if #s ~= 1 then return nil end
+    local idx = string.byte(s) - string.byte("A") + 1
+    if idx < 1 or idx > 10 then return nil end
+    return idx
+end
+
+function HelperPayroll:getHelperProfilesSlotInfo(slot)
+    local idx = self:slotToHelperProfilesIndex(slot)
+    if idx == nil then return nil end
+
+    local ok, data = self:callHelperProfilesAPI("getSlotData", string.upper(tostring(slot)))
+    if not ok or type(data) ~= "table" then
+        return nil
+    end
+
+    return {
+        slot = tostring(data.slot or string.upper(tostring(slot))),
+        index = tonumber(data.index) or idx,
+        helper = nil,
+        identityId = data.identityId ~= nil and tostring(data.identityId) or nil,
+        identitySource = data.identitySource ~= nil and tostring(data.identitySource) or nil,
+        baseName = data.baseName,
+        displayName = tostring(data.displayName or data.baseName or ("Helper " .. string.upper(tostring(slot)))),
+        appearanceLabel = data.appearanceLabel,
+        presetId = data.presetId,
+        category = data.category,
+        inUse = data.inUse == true,
+        selected = data.selected == true,
+        selectedIndex = data.selectedIndex,
+        source = tostring(data.source or "shared-api")
+    }
+end
+
+function HelperPayroll:getHelperProfilesStatus()
+    local modLoaded, detectionSource = self:isHelperProfilesModLoaded()
+    local api = self:getHelperProfilesAPI(true)
+    local apiAvailable = api ~= nil
+
+    local apiStatus = nil
+    if apiAvailable then
+        local ok, result = self:callHelperProfilesAPI("getStatus")
+        if ok and type(result) == "table" then
+            apiStatus = result
+        end
+    end
+
+    local selectedSlot = apiStatus ~= nil and apiStatus.selectedSlot or nil
+    local selectedName = apiStatus ~= nil and apiStatus.selectedName or nil
+    local selectedIndex = apiStatus ~= nil and tonumber(apiStatus.selectedIndex) or nil
+    local profileCount = apiStatus ~= nil and tonumber(apiStatus.profileCount) or 0
+
+    if selectedSlot == nil and apiAvailable then
+        local ok, result = self:callHelperProfilesAPI("getSelectedSlot")
+        if ok then selectedSlot = result end
+    end
+    if selectedName == nil and apiAvailable then
+        local ok, result = self:callHelperProfilesAPI("getSelectedDisplayName")
+        if ok then selectedName = result end
+    end
+
+    local source = "none"
+    if apiAvailable then
+        source = "shared-api"
+    elseif modLoaded then
+        source = "mod-loaded-api-unavailable"
+    end
+
+    self.helperProfilesBridge = self.helperProfilesBridge or {}
+    self.helperProfilesBridge.modLoaded = modLoaded == true
+    self.helperProfilesBridge.apiAvailable = apiAvailable
+    self.helperProfilesBridge.apiVersion = apiAvailable and tonumber(api.apiVersion) or nil
+    self.helperProfilesBridge.modVersion = apiAvailable and tostring(api.modVersion or "") or nil
+    self.helperProfilesBridge.source = source
+    self.helperProfilesBridge.detectionSource = detectionSource
+
+    return {
+        available = modLoaded == true and apiAvailable,
+        modLoaded = modLoaded == true,
+        detectionSource = detectionSource,
+        apiAvailable = apiAvailable,
+        apiVersion = apiAvailable and tonumber(api.apiVersion) or nil,
+        helperProfilesVersion = apiAvailable and tostring(api.modVersion or "") or nil,
+        source = source,
+        profileCount = profileCount,
+        identityCount = profileCount,
+        selectedIndex = selectedIndex,
+        selectedSlot = selectedSlot,
+        selectedName = selectedName,
+        pickMode = apiStatus ~= nil and apiStatus.pickMode or nil
+    }
+end
+
+function HelperPayroll:logHelperProfilesIntegrationStatus(reason)
+    local status = self:getHelperProfilesStatus()
+    if status.available then
+        rcLog(
+            "HelperProfiles integration detected: reason=%s source=%s detection=%s apiVersion=%s helperProfilesVersion=%s profiles=%d selectedSlot=%s selectedName=%s payrollMode=%s",
+            tostring(reason),
+            tostring(status.source),
+            tostring(status.detectionSource),
+            tostring(status.apiVersion or "-"),
+            tostring(status.helperProfilesVersion or "-"),
+            tonumber(status.profileCount) or 0,
+            tostring(status.selectedSlot or "-"),
+            tostring(status.selectedName or "-"),
+            tostring(self.settings.payrollMode)
+        )
+    elseif status.modLoaded then
+        rcLog(
+            "HelperProfiles mod detected but shared API is not published yet: reason=%s. HelperPayroll will remain standalone until the live API becomes available.",
+            tostring(reason)
+        )
+    else
+        rcLog("HelperProfiles mod not loaded: reason=%s payrollMode=%s standalone roleType mode available", tostring(reason), tostring(self.settings.payrollMode))
+    end
+end
+
+function HelperPayroll:rebuildHelperProfilesMappingIndexes()
+    self.helperProfilesMappings = self.helperProfilesMappings or {}
+    self.helperProfilesMappingsByIdentity = {}
+    self.helperProfilesMappingsBySlot = {}
+    for _, mapping in ipairs(self.helperProfilesMappings) do
+        if mapping ~= nil then
+            if mapping.identityId ~= nil and tostring(mapping.identityId) ~= "" then
+                self.helperProfilesMappingsByIdentity[tostring(mapping.identityId)] = mapping
+            end
+            if mapping.slot ~= nil and tostring(mapping.slot) ~= "" then
+                self.helperProfilesMappingsBySlot[string.upper(tostring(mapping.slot))] = mapping
+            end
+        end
+    end
+end
+
+function HelperPayroll:getHelperProfilesPayrollMapping(slotInfo, slot)
+    self:rebuildHelperProfilesMappingIndexes()
+    local identityId = slotInfo ~= nil and slotInfo.identityId ~= nil and tostring(slotInfo.identityId) or nil
+    if identityId ~= nil and identityId ~= "" then
+        local mapping = self.helperProfilesMappingsByIdentity[identityId]
+        if mapping ~= nil then
+            return mapping, "identity"
+        end
+        -- API v2 preset identities are authoritative. Do not inherit a stale mapping
+        -- merely because a different named worker has moved into the old A-J slot.
+        if string.sub(identityId, 1, 5) ~= "slot:" then
+            return nil, "none"
+        end
+    end
+    if slot ~= nil then
+        local mapping = self.helperProfilesMappingsBySlot[string.upper(tostring(slot))]
+        if mapping ~= nil then
+            return mapping, "slot"
+        end
+    end
+    return nil, "none"
+end
+
+function HelperPayroll:setHelperProfilesPayrollMapping(slotInfo, slot, roleId)
+    roleId = tostring(roleId or self.settings.fallbackRole or "standard")
+    slot = slot ~= nil and string.upper(tostring(slot)) or nil
+    local identityId = slotInfo ~= nil and slotInfo.identityId or (slot ~= nil and ("slot:" .. slot) or nil)
+    local existing, _ = self:getHelperProfilesPayrollMapping(slotInfo, slot)
+    local mapping = existing
+    if mapping == nil then
+        mapping = {}
+        table.insert(self.helperProfilesMappings, mapping)
+    end
+    mapping.identityId = identityId
+    mapping.identitySource = slotInfo ~= nil and slotInfo.identitySource or "slotFallback"
+    mapping.slot = slot
+    mapping.helperName = slotInfo ~= nil and slotInfo.displayName or (slot ~= nil and ("Helper " .. slot) or "Helper")
+    mapping.roleId = roleId
+    mapping.workerRateId = roleId
+    self:rebuildHelperProfilesMappingIndexes()
+    return mapping
+end
+
+function HelperPayroll:getEffectiveHelperProfilesRole(slotInfo, slot, profileId)
+    local mapping, mappingSource = self:getHelperProfilesPayrollMapping(slotInfo, slot)
+    if mapping ~= nil then
+        local roleId = mapping.workerRateId or mapping.roleId
+        if roleId ~= nil and self:getWorkerRateById(profileId, roleId) ~= nil then
+            return tostring(roleId), mapping, "save-" .. tostring(mappingSource)
+        end
+    end
+    local slotConfig = self.helperSlots ~= nil and self.helperSlots[profileId] ~= nil and self.helperSlots[profileId][slot] or nil
+    if slotConfig ~= nil and slotConfig.workerRate ~= nil then
+        return tostring(slotConfig.workerRate), slotConfig, "policy-slot"
+    end
+    return tostring(self.settings.fallbackRole or "standard"), nil, "fallback-role"
+end
+
 function HelperPayroll:resolveWorkerAssignment(tracked)
     local _, profileId = self:getActiveProfile()
     local helperSlot, helperSlotSource = self:detectHelperSlotForJob(tracked ~= nil and tracked.job or nil, tracked)
     local payrollMode = tostring(self.settings.payrollMode or "roleType")
     local helperSlotUsedForPayroll = false
-    local slotConfig = nil
-
-    if self:isHelperSlotPayrollMode() and helperSlot ~= nil and self.helperSlots ~= nil and self.helperSlots[profileId] ~= nil then
-        slotConfig = self.helperSlots[profileId][helperSlot]
-        if slotConfig ~= nil then
-            helperSlotUsedForPayroll = true
-        end
-    end
+    local hpSlotInfo = self:getHelperProfilesSlotInfo(helperSlot)
+    local identitySource = hpSlotInfo ~= nil and tostring(hpSlotInfo.source or "HelperProfilesAPI") or "HelperPayroll"
+    local mappingSource = "roleType"
 
     local workerId = self.settings.selectedRole or self.settings.fallbackRole or "standard"
     local helperName = nil
     local helperRole = nil
 
-    if slotConfig ~= nil then
-        workerId = slotConfig.workerRate or workerId
-        helperName = slotConfig.name
-        helperRole = slotConfig.role
+    if self:isHelperSlotPayrollMode() and helperSlot ~= nil then
+        local roleId, mapping, resolvedSource = self:getEffectiveHelperProfilesRole(hpSlotInfo, helperSlot, profileId)
+        workerId = roleId
+        mappingSource = resolvedSource
+        helperSlotUsedForPayroll = true
+        helperName = hpSlotInfo ~= nil and hpSlotInfo.displayName or (mapping ~= nil and mapping.helperName) or ("Helper " .. tostring(helperSlot))
+        helperRole = mapping ~= nil and mapping.roleId or nil
     end
 
     local worker = self:getWorkerRateById(profileId, workerId)
@@ -1828,14 +2189,17 @@ function HelperPayroll:resolveWorkerAssignment(tracked)
     if worker == nil then
         worker, profileId = self:getSelectedWorkerRate()
         workerId = worker.id or workerId
+        mappingSource = "selected-role-fallback"
     end
 
-    if slotConfig == nil and self:isRoleTypePayrollMode() then
+    if self:isRoleTypePayrollMode() then
         helperName = worker.name or workerId or "Worker"
         helperRole = worker.name or "Worker"
+        identitySource = "roleType"
+        mappingSource = "selected-role"
     else
-        helperName = helperName or worker.name or workerId or "Worker"
-        helperRole = helperRole or worker.name or "Worker"
+        helperName = helperName or (hpSlotInfo ~= nil and hpSlotInfo.displayName) or worker.name or workerId or "Worker"
+        helperRole = worker.name or helperRole or "Worker"
     end
 
     return {
@@ -1848,45 +2212,109 @@ function HelperPayroll:resolveWorkerAssignment(tracked)
         helperRole = helperRole,
         workerId = workerId,
         workerName = worker.name or workerId or "Worker",
-        hourlyRate = tonumber(worker.hourlyRate) or 0
+        hourlyRate = tonumber(worker.hourlyRate) or 0,
+        helperIdentityId = hpSlotInfo ~= nil and hpSlotInfo.identityId or nil,
+        helperIdentitySource = identitySource,
+        helperMappingSource = mappingSource,
+        helperProfilesName = hpSlotInfo ~= nil and hpSlotInfo.displayName or nil,
+        helperProfilesSelected = hpSlotInfo ~= nil and hpSlotInfo.selected == true or false
     }
 end
 
-function HelperPayroll:getGameDateKey()
-    if g_currentMission ~= nil and g_currentMission.environment ~= nil then
-        local env = g_currentMission.environment
-        local day = env.currentDay or env.day or env.currentMonotonicDay
-        local month = env.currentPeriod or env.currentMonth or env.month
-        local year = env.currentYear or env.year
-
-        if day ~= nil or month ~= nil or year ~= nil then
-            return string.format("Y%s-M%02d-D%02d", tostring(year or "?"), tonumber(month) or 0, tonumber(day) or 0)
-        end
+function HelperPayroll:copyWorkerAssignment(assignment)
+    local copy = {}
+    for key, value in pairs(assignment or {}) do
+        copy[key] = value
     end
-
-    return "unknown"
+    return copy
 end
 
+function HelperPayroll:captureWorkerAssignment(tracked)
+    local assignment = self:resolveWorkerAssignment(tracked)
+    local clock = self:getGameClockSnapshot()
+    assignment.gameDate = clock.dateKey
+    assignment.workMonotonicDay = clock.monotonicDay
+    assignment.workDayTime = clock.dayTimeMs
+    assignment.farmId = self:getActiveFarmId()
+    assignment.snapshotSource = "job-start"
+    return assignment
+end
 
-function HelperPayroll:getGameHour()
-    if g_currentMission ~= nil and g_currentMission.environment ~= nil then
-        local env = g_currentMission.environment
-
-        if env.currentHour ~= nil then
-            return tonumber(env.currentHour)
-        end
-
-        if env.hour ~= nil then
-            return tonumber(env.hour)
-        end
-
-        local dayTime = env.dayTime or env.currentDayTime
-        if dayTime ~= nil then
-            return math.floor((tonumber(dayTime) or 0) / 3600000)
-        end
+function HelperPayroll:getWorkerAssignmentForBilling(tracked)
+    if tracked ~= nil and tracked.assignmentSnapshot ~= nil then
+        return self:copyWorkerAssignment(tracked.assignmentSnapshot)
     end
 
-    return nil
+    local assignment = self:resolveWorkerAssignment(tracked)
+    local clock = self:getGameClockSnapshot()
+    assignment.gameDate = clock.dateKey
+    assignment.workMonotonicDay = clock.monotonicDay
+    assignment.workDayTime = clock.dayTimeMs
+    assignment.farmId = self:getActiveFarmId()
+    assignment.snapshotSource = "finish-fallback"
+    rcWarn("Worker assignment snapshot was unavailable at billing time; resolved a fallback assignment at job finish")
+    return assignment
+end
+
+-- GIANTS uses currentMonotonicDay and dayTime as the authoritative game clock.
+-- Keep all payroll scheduling on those fields so accelerated time and period/year
+-- transitions cannot strand a pending daily row.
+function HelperPayroll:getGameClockSnapshot()
+    local snapshot = {
+        monotonicDay = nil,
+        dayTimeMs = nil,
+        hour = nil,
+        period = nil,
+        year = nil,
+        dateKey = "unknown"
+    }
+
+    if g_currentMission == nil or g_currentMission.environment == nil then
+        return snapshot
+    end
+
+    local env = g_currentMission.environment
+    snapshot.monotonicDay = tonumber(env.currentMonotonicDay)
+        or tonumber(env.currentDay)
+        or tonumber(env.day)
+    snapshot.dayTimeMs = tonumber(env.dayTime)
+        or tonumber(env.currentDayTime)
+
+    if snapshot.dayTimeMs ~= nil then
+        local totalDayMs = 24 * 60 * 60 * 1000
+        local normalized = snapshot.dayTimeMs % totalDayMs
+        snapshot.hour = math.floor(normalized / 3600000)
+    elseif env.currentHour ~= nil then
+        snapshot.hour = math.floor(tonumber(env.currentHour) or 0)
+    elseif env.hour ~= nil then
+        snapshot.hour = math.floor(tonumber(env.hour) or 0)
+    end
+
+    snapshot.period = tonumber(env.currentPeriod)
+        or tonumber(env.currentMonth)
+        or tonumber(env.month)
+        or 0
+    snapshot.year = tonumber(env.currentYear)
+        or tonumber(env.year)
+
+    if snapshot.monotonicDay ~= nil or snapshot.period ~= nil or snapshot.year ~= nil then
+        snapshot.dateKey = string.format(
+            "Y%s-M%02d-D%02d",
+            tostring(snapshot.year or "?"),
+            tonumber(snapshot.period) or 0,
+            tonumber(snapshot.monotonicDay) or 0
+        )
+    end
+
+    return snapshot
+end
+
+function HelperPayroll:getGameDateKey()
+    return self:getGameClockSnapshot().dateKey
+end
+
+function HelperPayroll:getGameHour()
+    return self:getGameClockSnapshot().hour
 end
 
 function HelperPayroll:isDailyPayrollMode()
@@ -1917,7 +2345,7 @@ function HelperPayroll:getActiveFarmId()
 end
 
 function HelperPayroll:calculateWorkerCharge(tracked)
-    local assignment = self:resolveWorkerAssignment(tracked)
+    local assignment = self:getWorkerAssignmentForBilling(tracked)
     local elapsedHours = (tracked ~= nil and tracked.elapsedMs or 0) / 3600000
     local hourlyRate = tonumber(assignment.hourlyRate) or 0
     local labourCharge = elapsedHours * hourlyRate
@@ -1944,26 +2372,55 @@ function HelperPayroll:calculateWorkerCharge(tracked)
 end
 
 
-function HelperPayroll:updateDailyLedger(entry)
+function HelperPayroll:getDailyLedgerIdentityKey(entry)
+    local identityId = entry ~= nil and entry.helperIdentityId or nil
+    if identityId ~= nil and tostring(identityId) ~= "" then
+        return tostring(identityId)
+    end
+
+    local slot = entry ~= nil and entry.helperSlot or nil
+    if slot ~= nil and tostring(slot) ~= "" and tostring(slot) ~= "unassigned" then
+        return "slot:" .. string.upper(tostring(slot))
+    end
+
+    return "name:" .. tostring(entry ~= nil and (entry.helperName or entry.workerName) or "Worker")
+end
+
+function HelperPayroll:getDailyLedgerKey(entry)
+    return string.format(
+        "%s|%s|%s|farm%s",
+        tostring(entry ~= nil and entry.gameDate or "unknown"),
+        tostring(entry ~= nil and (entry.profileId or entry.profile) or "default"),
+        self:getDailyLedgerIdentityKey(entry),
+        tostring(entry ~= nil and entry.farmId or "unknown")
+    )
+end
+
+function HelperPayroll:updateDailyLedger(entry, quiet)
     if entry == nil then
         return nil
     end
 
     self.workerDailyLedger = self.workerDailyLedger or {}
-    local key = string.format("%s|%s|%s|%s|farm%s", tostring(entry.gameDate or "unknown"), tostring(entry.profileId or "default"), tostring(entry.helperSlot or "unassigned"), tostring(entry.helperName or entry.workerName or "Worker"), tostring(entry.farmId or "unknown"))
+    local key = self:getDailyLedgerKey(entry)
     local daily = self.workerDailyLedger[key]
 
     if daily == nil then
         daily = {
             key = key,
             gameDate = entry.gameDate,
-            profileId = entry.profileId,
+            workMonotonicDay = tonumber(entry.workMonotonicDay),
+            workDayTime = tonumber(entry.workDayTime),
+            profileId = entry.profileId or entry.profile,
             helperSlot = entry.helperSlot,
-            helperName = entry.helperName,
-            helperRole = entry.helperRole,
-            workerId = entry.workerId,
-            hourlyRate = entry.hourlyRate,
-            farmId = entry.farmId,
+            helperIdentityId = entry.helperIdentityId,
+            helperIdentitySource = entry.helperIdentitySource,
+            helperMappingSource = entry.helperMappingSource,
+            helperName = entry.helperName or entry.helper,
+            helperRole = entry.helperRole or entry.role,
+            workerId = entry.workerId or entry.workerRate,
+            hourlyRate = tonumber(entry.hourlyRate or entry.rate) or 0,
+            farmId = tonumber(entry.farmId) or entry.farmId,
             jobs = 0,
             hours = 0,
             charged = 0,
@@ -1977,22 +2434,108 @@ function HelperPayroll:updateDailyLedger(entry)
     daily.jobs = (daily.jobs or 0) + 1
     daily.hours = (daily.hours or 0) + (tonumber(entry.elapsedHours) or 0)
     daily.charged = (daily.charged or 0) + (tonumber(entry.charge) or 0)
-    daily.labour = (daily.labour or 0) + (tonumber(entry.labourCharge) or 0)
+    daily.labour = (daily.labour or 0) + (tonumber(entry.labourCharge or entry.labour) or 0)
 
-    rcLog(
-        "Worker daily ledger: gameDate=%s helperSlot=%s helper=%s role=%s jobs=%d hours=%.3f labour=%.2f charged=%.2f payrollApplied=%s",
-        tostring(daily.gameDate),
-        tostring(daily.helperSlot),
-        tostring(daily.helperName),
-        tostring(daily.helperRole),
-        tonumber(daily.jobs) or 0,
-        tonumber(daily.hours) or 0,
-        tonumber(daily.labour) or 0,
-        tonumber(daily.charged) or 0,
-        tostring(daily.payrollApplied)
-    )
+    if quiet ~= true then
+        rcLog(
+            "Worker daily ledger: gameDate=%s helperSlot=%s identityId=%s helper=%s role=%s jobs=%d hours=%.3f labour=%.2f charged=%.2f payrollApplied=%s",
+            tostring(daily.gameDate),
+            tostring(daily.helperSlot),
+            tostring(daily.helperIdentityId or "-"),
+            tostring(daily.helperName),
+            tostring(daily.helperRole),
+            tonumber(daily.jobs) or 0,
+            tonumber(daily.hours) or 0,
+            tonumber(daily.labour) or 0,
+            tonumber(daily.charged) or 0,
+            tostring(daily.payrollApplied)
+        )
+    end
 
     return daily
+end
+
+function HelperPayroll:recoverPendingDailyPayrollFromLedger()
+    if not self:isDailyPayrollMode() or self.ledger == nil or self.ledger.index == nil then
+        return 0, 0
+    end
+
+    self.workerDailyLedger = self.workerDailyLedger or {}
+    local savedKeys = {}
+    for key, _ in pairs(self.workerDailyLedger) do savedKeys[key] = true end
+
+    local paidKeys = {}
+    local deferredEntries = {}
+    for _, periodId in ipairs(self.ledger.index.periodOrder or {}) do
+        local entries = self:loadPeriodLedger(periodId)
+        for _, entry in ipairs(entries or {}) do
+            local entryType = string.lower(tostring(entry.entryType or "job"))
+            local status = string.lower(tostring(entry.status or ""))
+            if entryType == "payment" and status == "paid" then
+                paidKeys[self:getDailyLedgerKey(entry)] = true
+            elseif entryType == "job" and status == "deferred" and string.lower(tostring(entry.billingMode or "")) == "dailypayroll" then
+                table.insert(deferredEntries, entry)
+            end
+        end
+    end
+
+    local removed = 0
+    for key, _ in pairs(self.workerDailyLedger) do
+        if paidKeys[key] then
+            self.workerDailyLedger[key] = nil
+            removed = removed + 1
+        end
+    end
+
+    local recoveredJobs = 0
+    for _, entry in ipairs(deferredEntries) do
+        local key = self:getDailyLedgerKey(entry)
+        if not paidKeys[key] and not savedKeys[key] then
+            self:updateDailyLedger({
+                gameDate = entry.gameDate,
+                workMonotonicDay = tonumber(entry.workMonotonicDay),
+                workDayTime = tonumber(entry.workDayTime),
+                profileId = entry.profile,
+                helperSlot = entry.helperSlot,
+                helperIdentityId = entry.helperIdentityId,
+                helperIdentitySource = entry.helperIdentitySource,
+                helperMappingSource = entry.helperMappingSource,
+                helperName = entry.helper,
+                helperRole = entry.role,
+                workerId = entry.workerRate,
+                hourlyRate = tonumber(entry.rate) or 0,
+                farmId = tonumber(entry.farmId) or 1,
+                elapsedHours = tonumber(entry.elapsedHours) or 0,
+                labourCharge = tonumber(entry.labour) or 0,
+                charge = 0
+            }, true)
+            recoveredJobs = recoveredJobs + 1
+        end
+    end
+
+    local pendingRows = self:countPendingDailyPayrollRows()
+    if pendingRows > 0 then
+        -- Run the due-date check on the next update rather than waiting for the
+        -- normal polling interval after a load or ledger migration.
+        self.payrollCheckAccumulatorMs = self.payrollCheckIntervalMs or 30000
+    end
+
+    if recoveredJobs > 0 or removed > 0 then
+        rcLog("Reconciled pending daily payroll from persistent ledger: recoveredJobs=%d removedPaidRows=%d pendingRows=%d", recoveredJobs, removed, pendingRows)
+        self:saveSavegameSettings("daily-payroll-reconciled")
+    end
+
+    return recoveredJobs, removed
+end
+
+function HelperPayroll:countPendingDailyPayrollRows()
+    local count = 0
+    for _, daily in pairs(self.workerDailyLedger or {}) do
+        if daily ~= nil and daily.payrollApplied ~= true and (tonumber(daily.jobs) or 0) > 0 then
+            count = count + 1
+        end
+    end
+    return count
 end
 
 function HelperPayroll:calculateDailyPayrollCharge(daily)
@@ -2039,78 +2582,168 @@ function HelperPayroll:applyMoneyCharge(amount, farmId, context)
     return true
 end
 
-function HelperPayroll:processDailyPayroll(dt)
-    if not self:isDailyPayrollMode() then
-        return
+function HelperPayroll:parseGameDateKey(value)
+    local yearText, month, day = tostring(value or ""):match("^Y([^%-]+)%-M(%d+)%-D(%d+)$")
+    if yearText == nil then return nil end
+    return tonumber(yearText), tonumber(month), tonumber(day), yearText
+end
+
+function HelperPayroll:compareGameDateKeys(left, right)
+    local ly, lm, ld, lyText = self:parseGameDateKey(left)
+    local ry, rm, rd, ryText = self:parseGameDateKey(right)
+    if lm == nil or rm == nil then return nil end
+    if ly ~= nil and ry ~= nil and ly ~= ry then return ly < ry and -1 or 1 end
+    if ly == nil and ry == nil and lyText ~= ryText then return nil end
+    if lm ~= rm then return lm < rm and -1 or 1 end
+    if ld ~= rd then return ld < rd and -1 or 1 end
+    return 0
+end
+
+function HelperPayroll:getStoredWorkMonotonicDay(daily)
+    if daily == nil then return nil end
+    local stored = tonumber(daily.workMonotonicDay)
+    if stored ~= nil then return stored end
+
+    -- Migration fallback for 0.3.2.0 and earlier pending rows. Their D component
+    -- was written from environment.currentDay, which is monotonic in the tested
+    -- FS25 environment.
+    local _, _, day = self:parseGameDateKey(daily.gameDate)
+    return tonumber(day)
+end
+
+function HelperPayroll:isDailyPayrollRowDue(daily, clock, payrollHour)
+    if daily == nil or daily.payrollApplied == true or (tonumber(daily.jobs) or 0) <= 0 then
+        return false, "not-pending"
     end
 
-    if not self.settings.enableCustomWorkerCosts or not self.settings.chargeCustomWorkerCosts then
-        return
+    clock = clock or self:getGameClockSnapshot()
+    local workDay = self:getStoredWorkMonotonicDay(daily)
+    local currentDay = tonumber(clock.monotonicDay)
+
+    if workDay ~= nil and currentDay ~= nil then
+        if currentDay > workDay then return true, "overdue-day" end
+        if currentDay < workDay then return false, "future-row" end
+        if clock.hour ~= nil and clock.hour >= payrollHour then
+            return true, "scheduled-hour"
+        end
+        return false, "same-day-waiting"
     end
+
+    -- Legacy fallback only when the authoritative monotonic values cannot be read.
+    local comparison = self:compareGameDateKeys(daily.gameDate, clock.dateKey)
+    if comparison ~= nil then
+        if comparison < 0 then return true, "legacy-overdue-date" end
+        if comparison > 0 then return false, "legacy-future-date" end
+        return clock.hour ~= nil and clock.hour >= payrollHour, "legacy-same-day"
+    end
+
+    return clock.hour ~= nil and clock.hour >= payrollHour, "unknown-date-clock"
+end
+
+function HelperPayroll:processDailyPayroll(dt, force, triggerReason)
+    if not self:isDailyPayrollMode() then return end
+    if not self.settings.enableCustomWorkerCosts or not self.settings.chargeCustomWorkerCosts then return end
+
+    local clock = self:getGameClockSnapshot()
+    local clockChanged = clock.monotonicDay ~= self.lastPayrollClockDay
+        or clock.hour ~= self.lastPayrollClockHour
 
     self.payrollCheckAccumulatorMs = (self.payrollCheckAccumulatorMs or 0) + (dt or 0)
-    if self.payrollCheckAccumulatorMs < (self.payrollCheckIntervalMs or 30000) then
+    if force ~= true and not clockChanged and self.payrollCheckAccumulatorMs < (self.payrollCheckIntervalMs or 5000) then
         return
     end
     self.payrollCheckAccumulatorMs = 0
 
-    local currentHour = self:getGameHour()
-    if currentHour == nil then
-        if not self.warnedMissingPayrollClock then
-            rcWarn("Daily payroll mode is enabled but game hour could not be resolved; payroll will not run until the clock is readable")
-            self.warnedMissingPayrollClock = true
-        end
-        return
-    end
+    self.lastPayrollClockDay = clock.monotonicDay
+    self.lastPayrollClockHour = clock.hour
+    self.lastPayrollClockDayTime = clock.dayTimeMs
 
     local payrollHour = tonumber(self.settings.payrollHour) or 18
-    if currentHour < payrollHour then
-        return
+    local pendingRows = self:countPendingDailyPayrollRows()
+    if pendingRows <= 0 then return end
+
+    if (force == true or clockChanged) and self:isDetailedDiagnosticsEnabled() then
+        rcLog(
+            "Daily payroll check: trigger=%s currentDate=%s currentMonotonicDay=%s dayTimeMs=%s hour=%s payrollHour=%s pendingRows=%d",
+            tostring(triggerReason or (clockChanged and "clock-changed" or "forced")),
+            tostring(clock.dateKey),
+            tostring(clock.monotonicDay),
+            tostring(clock.dayTimeMs),
+            tostring(clock.hour),
+            tostring(payrollHour),
+            tonumber(pendingRows) or 0
+        )
     end
 
-    local currentDate = self:getGameDateKey()
     local rowsPaid = 0
     local totalPaid = 0
+    local paidKeys = {}
+    local waitingForClock = false
 
-    for _, daily in pairs(self.workerDailyLedger or {}) do
-        if daily ~= nil and not daily.payrollApplied and (daily.jobs or 0) > 0 and (daily.gameDate == currentDate or daily.gameDate == nil or daily.gameDate == "unknown") then
+    for key, daily in pairs(self.workerDailyLedger or {}) do
+        local due, dueReason = self:isDailyPayrollRowDue(daily, clock, payrollHour)
+        if due then
             local charge, minimumApplied = self:calculateDailyPayrollCharge(daily)
-            if charge > 0 then
-                local farmId = daily.farmId or self:getActiveFarmId()
-                local applied = self:applyMoneyCharge(charge, farmId, "Daily payroll charge")
-                if applied then
-                    daily.payrollApplied = true
-                    daily.payrollCharge = charge
-                    daily.minimumApplied = minimumApplied
-                    daily.charged = (tonumber(daily.charged) or 0) + charge
-                    rowsPaid = rowsPaid + 1
-                    totalPaid = totalPaid + charge
-                    self.workerLedgerTotal = (self.workerLedgerTotal or 0) + charge
-                    rcLog(
-                        "Daily payroll applied: gameDate=%s helperSlot=%s helper=%s role=%s jobs=%d hours=%.3f labour=%.2f callout=%.2f minimum=%.2f minimumApplied=%s charge=%.2f farmId=%s payrollHour=%s moneyType=%s",
-                        tostring(daily.gameDate),
-                        tostring(daily.helperSlot),
-                        tostring(daily.helperName),
-                        tostring(daily.helperRole),
-                        tonumber(daily.jobs) or 0,
-                        tonumber(daily.hours) or 0,
-                        tonumber(daily.labour) or 0,
-                        tonumber(self.settings.workerCalloutFee) or 0,
-                        tonumber(self.settings.minimumWorkerCharge) or 0,
-                        tostring(minimumApplied),
-                        tonumber(charge) or 0,
-                        tostring(farmId),
-                        tostring(payrollHour),
-                        tostring(self:getMoneyTypeName(MoneyType ~= nil and MoneyType.AI or nil))
-                    )
-                    self:recordPersistentDailyPayment(daily, charge, minimumApplied)
-                end
+            local farmId = daily.farmId or self:getActiveFarmId()
+            local applied = charge <= 0 or self:applyMoneyCharge(charge, farmId, "Daily payroll charge")
+            if applied then
+                daily.payrollApplied = true
+                daily.payrollCharge = charge
+                daily.minimumApplied = minimumApplied
+                daily.charged = (tonumber(daily.charged) or 0) + charge
+                daily.paidMonotonicDay = clock.monotonicDay
+                daily.paidDayTime = clock.dayTimeMs
+                rowsPaid = rowsPaid + 1
+                totalPaid = totalPaid + charge
+                self.workerLedgerTotal = (self.workerLedgerTotal or 0) + charge
+                rcLog(
+                    "Daily payroll settled: reason=%s workDate=%s workMonotonicDay=%s paidDate=%s paidMonotonicDay=%s helperSlot=%s identityId=%s helper=%s role=%s jobs=%d hours=%.3f labour=%.2f callout=%.2f minimum=%.2f minimumApplied=%s charge=%.2f farmId=%s payrollHour=%s moneyType=%s",
+                    tostring(dueReason),
+                    tostring(daily.gameDate),
+                    tostring(self:getStoredWorkMonotonicDay(daily)),
+                    tostring(clock.dateKey),
+                    tostring(clock.monotonicDay),
+                    tostring(daily.helperSlot),
+                    tostring(daily.helperIdentityId or "-"),
+                    tostring(daily.helperName),
+                    tostring(daily.helperRole),
+                    tonumber(daily.jobs) or 0,
+                    tonumber(daily.hours) or 0,
+                    tonumber(daily.labour) or 0,
+                    tonumber(self.settings.workerCalloutFee) or 0,
+                    tonumber(self.settings.minimumWorkerCharge) or 0,
+                    tostring(minimumApplied),
+                    tonumber(charge) or 0,
+                    tostring(farmId),
+                    tostring(payrollHour),
+                    tostring(self:getMoneyTypeName(MoneyType ~= nil and MoneyType.AI or nil))
+                )
+                self:recordPersistentDailyPayment(daily, charge, minimumApplied)
+                table.insert(paidKeys, key)
             end
+        elseif dueReason == "same-day-waiting" and clock.hour == nil then
+            waitingForClock = true
         end
+    end
+
+    for _, key in ipairs(paidKeys) do
+        self.workerDailyLedger[key] = nil
     end
 
     if rowsPaid > 0 then
-        rcLog("Daily payroll summary: gameDate=%s rows=%d totalPaid=%.2f sessionTotalCharged=%.2f", tostring(currentDate), rowsPaid, totalPaid, tonumber(self.workerLedgerTotal) or 0)
+        self:saveSavegameSettings("daily-payroll-settled")
+        rcLog(
+            "Daily payroll summary: trigger=%s paidDate=%s paidMonotonicDay=%s rows=%d totalPaid=%.2f sessionTotalCharged=%.2f",
+            tostring(triggerReason or "poll"),
+            tostring(clock.dateKey),
+            tostring(clock.monotonicDay),
+            rowsPaid,
+            totalPaid,
+            tonumber(self.workerLedgerTotal) or 0
+        )
+    elseif waitingForClock and not self.warnedMissingPayrollClock then
+        rcWarn("Daily payroll has current-day rows but environment.dayTime could not be resolved; overdue monotonic-day rows remain payable")
+        self.warnedMissingPayrollClock = true
     end
 end
 
@@ -2134,7 +2767,7 @@ function HelperPayroll:applyWorkerCharge(tracked)
     end
 
     local chargeToApply, breakdown = self:calculateWorkerCharge(tracked)
-    local farmId = self:getActiveFarmId()
+    local farmId = breakdown.farmId or self:getActiveFarmId()
 
     self.workerLedgerCount = (self.workerLedgerCount or 0) + 1
     local entry = {
@@ -2145,6 +2778,11 @@ function HelperPayroll:applyWorkerCharge(tracked)
         helperSlot = breakdown.helperSlot,
         helperSlotSource = breakdown.helperSlotSource,
         helperSlotUsedForPayroll = breakdown.helperSlotUsedForPayroll,
+        helperIdentityId = breakdown.helperIdentityId,
+        helperIdentitySource = breakdown.helperIdentitySource,
+        helperMappingSource = breakdown.helperMappingSource,
+        helperProfilesName = breakdown.helperProfilesName,
+        helperProfilesSelected = breakdown.helperProfilesSelected,
         payrollMode = breakdown.payrollMode,
         helperName = breakdown.helperName,
         helperRole = breakdown.helperRole,
@@ -2154,7 +2792,10 @@ function HelperPayroll:applyWorkerCharge(tracked)
         calculatedJobCharge = chargeToApply,
         farmId = farmId,
         profileId = breakdown.profileId,
-        gameDate = self:getGameDateKey(),
+        gameDate = breakdown.gameDate or self:getGameDateKey(),
+        workMonotonicDay = breakdown.workMonotonicDay,
+        workDayTime = breakdown.workDayTime,
+        assignmentSnapshotSource = breakdown.snapshotSource,
         billingMode = self.settings.billingMode
     }
     entry.labourCharge = breakdown.labourCharge
@@ -2184,6 +2825,8 @@ function HelperPayroll:applyWorkerCharge(tracked)
             tostring(self.settings.payrollHour)
         )
         self:recordPersistentLedgerEntry(self:buildPersistentLedgerEntryFromWorkerEntry(entry, "deferred"), "job-deferred")
+        self:saveSavegameSettings("daily-payroll-pending")
+        self:processDailyPayroll(0, true, "job-deferred")
         return true
     end
 
@@ -2433,12 +3076,13 @@ function HelperPayroll:scanActiveAIJobs(dt)
                 billed = false
             }
 
-            local assignment = self:resolveWorkerAssignment(self.trackedAIJobs[jobId])
+            local assignment = self:captureWorkerAssignment(self.trackedAIJobs[jobId])
+            self.trackedAIJobs[jobId].assignmentSnapshot = assignment
             self.trackedAIJobs[jobId].helperSlot = assignment.helperSlot
             self.trackedAIJobs[jobId].helperSlotSource = assignment.helperSlotSource
             self.trackedAIJobs[jobId].helperSlotUsedForPayroll = assignment.helperSlotUsedForPayroll
             self.trackedAIJobs[jobId].payrollMode = assignment.payrollMode
-            rcLog("AI job detected #%d: id=%s type=%s payrollMode=%s helperSlot=%s helperSlotSource=%s helperSlotUsedForPayroll=%s helper=%s role=%s workerRate=%s profile=%s rate=%.2f", self.trackedAIJobCount, tostring(jobId), tostring(self.trackedAIJobs[jobId].name), tostring(assignment.payrollMode), tostring(assignment.helperSlot), tostring(assignment.helperSlotSource), tostring(assignment.helperSlotUsedForPayroll), tostring(assignment.helperName), tostring(assignment.helperRole), tostring(assignment.workerId), tostring(assignment.profileId), tonumber(assignment.hourlyRate) or 0)
+            rcLog("AI job detected #%d: id=%s type=%s payrollMode=%s helperSlot=%s helperSlotSource=%s helperSlotUsedForPayroll=%s identityId=%s identitySource=%s mappingSource=%s helper=%s role=%s workerRate=%s profile=%s rate=%.2f assignmentSnapshot=%s", self.trackedAIJobCount, tostring(jobId), tostring(self.trackedAIJobs[jobId].name), tostring(assignment.payrollMode), tostring(assignment.helperSlot), tostring(assignment.helperSlotSource), tostring(assignment.helperSlotUsedForPayroll), tostring(assignment.helperIdentityId or "-"), tostring(assignment.helperIdentitySource or "unknown"), tostring(assignment.helperMappingSource or "unknown"), tostring(assignment.helperName), tostring(assignment.helperRole), tostring(assignment.workerId), tostring(assignment.profileId), tonumber(assignment.hourlyRate) or 0, tostring(assignment.snapshotSource))
             self:diagnosticScanAIJobForHelperProfiles(job, self.trackedAIJobs[jobId])
         end
 
@@ -2616,6 +3260,7 @@ end
 
 function HelperPayroll:loadSavegameSettings()
     self:initPersistencePaths()
+    self.workerDailyLedger = {}
     local path = self.persistence ~= nil and self.persistence.filePath or nil
     if path == nil or path == "" then
         rcWarn("Savegame persistence skipped: no settings path resolved")
@@ -2660,6 +3305,62 @@ function HelperPayroll:loadSavegameSettings()
         rateIndex = rateIndex + 1
     end
 
+    self.helperProfilesMappings = {}
+    local mappingIndex = 0
+    while true do
+        local key = string.format("helperPayrollSave.helperProfilesMappings.worker(%d)", mappingIndex)
+        if not hasXMLProperty(xmlFile, key) then break end
+        local mapping = {
+            identityId = getXmlStringOrDefault(xmlFile, key .. "#identityId", ""),
+            identitySource = getXmlStringOrDefault(xmlFile, key .. "#identitySource", ""),
+            slot = string.upper(getXmlStringOrDefault(xmlFile, key .. "#slot", "")),
+            helperName = getXmlStringOrDefault(xmlFile, key .. "#helperName", ""),
+            roleId = getXmlStringOrDefault(xmlFile, key .. "#roleId", self.settings.fallbackRole or "standard"),
+            workerRateId = getXmlStringOrDefault(xmlFile, key .. "#workerRateId", self.settings.fallbackRole or "standard")
+        }
+        if mapping.identityId ~= "" or mapping.slot ~= "" then
+            table.insert(self.helperProfilesMappings, mapping)
+        end
+        mappingIndex = mappingIndex + 1
+    end
+    self:rebuildHelperProfilesMappingIndexes()
+
+    self.workerDailyLedger = {}
+    local pendingIndex = 0
+    while true do
+        local key = string.format("helperPayrollSave.pendingPayroll.row(%d)", pendingIndex)
+        if not hasXMLProperty(xmlFile, key) then break end
+        local daily = {
+            gameDate = getXmlStringOrDefault(xmlFile, key .. "#gameDate", "unknown"),
+            workMonotonicDay = getXmlFloatOrDefault(xmlFile, key .. "#workMonotonicDay", nil),
+            workDayTime = getXmlFloatOrDefault(xmlFile, key .. "#workDayTime", nil),
+            profileId = getXmlStringOrDefault(xmlFile, key .. "#profileId", self.settings.activePayrollProfile or "default"),
+            helperSlot = getXmlStringOrDefault(xmlFile, key .. "#helperSlot", "unassigned"),
+            helperIdentityId = getXmlStringOrDefault(xmlFile, key .. "#helperIdentityId", ""),
+            helperIdentitySource = getXmlStringOrDefault(xmlFile, key .. "#helperIdentitySource", ""),
+            helperMappingSource = getXmlStringOrDefault(xmlFile, key .. "#helperMappingSource", ""),
+            helperName = getXmlStringOrDefault(xmlFile, key .. "#helperName", "Worker"),
+            helperRole = getXmlStringOrDefault(xmlFile, key .. "#helperRole", "Worker"),
+            workerId = getXmlStringOrDefault(xmlFile, key .. "#workerId", self.settings.fallbackRole or "standard"),
+            hourlyRate = getXmlFloatOrDefault(xmlFile, key .. "#hourlyRate", 0),
+            farmId = getXmlFloatOrDefault(xmlFile, key .. "#farmId", 1),
+            jobs = getXmlFloatOrDefault(xmlFile, key .. "#jobs", 0),
+            hours = getXmlFloatOrDefault(xmlFile, key .. "#hours", 0),
+            labour = getXmlFloatOrDefault(xmlFile, key .. "#labour", 0),
+            charged = getXmlFloatOrDefault(xmlFile, key .. "#charged", 0),
+            payrollApplied = false,
+            payrollCharge = 0
+        }
+        daily.key = self:getDailyLedgerKey(daily)
+        if (tonumber(daily.jobs) or 0) > 0 then
+            self.workerDailyLedger[daily.key] = daily
+        end
+        pendingIndex = pendingIndex + 1
+    end
+    if pendingIndex > 0 then
+        rcLog("Loaded pending daily payroll rows: rows=%d", pendingIndex)
+    end
+
     self.settings.roleSelectorDebounceMs = getXmlFloatOrDefault(xmlFile, "helperPayrollSave.ui#debounceMs", self.settings.roleSelectorDebounceMs or 450)
 
     self.roleListUi = self.roleListUi or {}
@@ -2699,7 +3400,7 @@ function HelperPayroll:saveSavegameSettings(reason)
     end
 
     local ui = self.roleListUi or {}
-    setXMLString(xmlFile, "helperPayrollSave#version", "0.2.3.6")
+    setXMLString(xmlFile, "helperPayrollSave#version", tostring(self.VERSION or "0.3.3.0"))
     setXMLString(xmlFile, "helperPayrollSave#savegame", tostring(self.persistence.savegameName or "unknownSavegame"))
     setXMLString(xmlFile, "helperPayrollSave#activePayrollProfile", tostring(self.settings.activePayrollProfile or "default"))
     setXMLString(xmlFile, "helperPayrollSave#payrollMode", tostring(self.settings.payrollMode or "roleType"))
@@ -2727,6 +3428,53 @@ function HelperPayroll:saveSavegameSettings(reason)
             setXMLString(xmlFile, key .. "#name", tostring(worker.name or roleId))
             setXMLFloat(xmlFile, key .. "#hourlyRate", tonumber(worker.hourlyRate) or 0)
         end
+    end
+
+    self:rebuildHelperProfilesMappingIndexes()
+    local mappings = self.helperProfilesMappings or {}
+    table.sort(mappings, function(a, b)
+        local as = tostring(a.slot or "Z")
+        local bs = tostring(b.slot or "Z")
+        if as == bs then return tostring(a.identityId or "") < tostring(b.identityId or "") end
+        return as < bs
+    end)
+    for i, mapping in ipairs(mappings) do
+        local key = string.format("helperPayrollSave.helperProfilesMappings.worker(%d)", i - 1)
+        setXMLString(xmlFile, key .. "#identityId", tostring(mapping.identityId or ""))
+        setXMLString(xmlFile, key .. "#identitySource", tostring(mapping.identitySource or ""))
+        setXMLString(xmlFile, key .. "#slot", tostring(mapping.slot or ""))
+        setXMLString(xmlFile, key .. "#helperName", tostring(mapping.helperName or ""))
+        setXMLString(xmlFile, key .. "#roleId", tostring(mapping.roleId or mapping.workerRateId or self.settings.fallbackRole or "standard"))
+        setXMLString(xmlFile, key .. "#workerRateId", tostring(mapping.workerRateId or mapping.roleId or self.settings.fallbackRole or "standard"))
+    end
+
+    local pendingKeys = {}
+    for key, daily in pairs(self.workerDailyLedger or {}) do
+        if daily ~= nil and daily.payrollApplied ~= true and (tonumber(daily.jobs) or 0) > 0 then
+            table.insert(pendingKeys, key)
+        end
+    end
+    table.sort(pendingKeys)
+    for i, pendingKey in ipairs(pendingKeys) do
+        local daily = self.workerDailyLedger[pendingKey]
+        local key = string.format("helperPayrollSave.pendingPayroll.row(%d)", i - 1)
+        setXMLString(xmlFile, key .. "#gameDate", tostring(daily.gameDate or "unknown"))
+        if daily.workMonotonicDay ~= nil then setXMLInt(xmlFile, key .. "#workMonotonicDay", math.floor(tonumber(daily.workMonotonicDay) or 0)) end
+        if daily.workDayTime ~= nil then setXMLFloat(xmlFile, key .. "#workDayTime", tonumber(daily.workDayTime) or 0) end
+        setXMLString(xmlFile, key .. "#profileId", tostring(daily.profileId or self.settings.activePayrollProfile or "default"))
+        setXMLString(xmlFile, key .. "#helperSlot", tostring(daily.helperSlot or "unassigned"))
+        setXMLString(xmlFile, key .. "#helperIdentityId", tostring(daily.helperIdentityId or ""))
+        setXMLString(xmlFile, key .. "#helperIdentitySource", tostring(daily.helperIdentitySource or ""))
+        setXMLString(xmlFile, key .. "#helperMappingSource", tostring(daily.helperMappingSource or ""))
+        setXMLString(xmlFile, key .. "#helperName", tostring(daily.helperName or "Worker"))
+        setXMLString(xmlFile, key .. "#helperRole", tostring(daily.helperRole or "Worker"))
+        setXMLString(xmlFile, key .. "#workerId", tostring(daily.workerId or self.settings.fallbackRole or "standard"))
+        setXMLFloat(xmlFile, key .. "#hourlyRate", tonumber(daily.hourlyRate) or 0)
+        setXMLInt(xmlFile, key .. "#farmId", math.floor(tonumber(daily.farmId) or 1))
+        setXMLInt(xmlFile, key .. "#jobs", math.floor(tonumber(daily.jobs) or 0))
+        setXMLFloat(xmlFile, key .. "#hours", tonumber(daily.hours) or 0)
+        setXMLFloat(xmlFile, key .. "#labour", tonumber(daily.labour) or 0)
+        setXMLFloat(xmlFile, key .. "#charged", tonumber(daily.charged) or 0)
     end
 
     setXMLString(xmlFile, "helperPayrollSave.ui#anchor", tostring(ui.anchor or "TR"))
@@ -2826,6 +3574,18 @@ local function hpayXmlGetBool(xmlFile, key, default)
     local value = getXMLBool(xmlFile, key)
     if value == nil then return default == true end
     return value
+end
+
+local function hpayXmlGetOptionalInt(xmlFile, key)
+    if xmlFile == nil or key == nil then return nil end
+    if hasXMLProperty ~= nil and not hasXMLProperty(xmlFile, key) then return nil end
+    return getXMLInt(xmlFile, key)
+end
+
+local function hpayXmlGetOptionalFloat(xmlFile, key)
+    if xmlFile == nil or key == nil then return nil end
+    if hasXMLProperty ~= nil and not hasXMLProperty(xmlFile, key) then return nil end
+    return getXMLFloat(xmlFile, key)
 end
 
 local function hpayWriteFile(path, lines)
@@ -3000,7 +3760,7 @@ function HelperPayroll:saveLedgerIndex(reason)
     local s = idx.summary or {}
     local lines = {}
     table.insert(lines, '<?xml version="1.0" encoding="utf-8" standalone="no" ?>')
-    table.insert(lines, '<helperPayrollLedgerIndex' .. hpayXmlAttr("version", "0.2.3.6") .. hpayXmlAttr("savegame", self.persistence ~= nil and self.persistence.savegameName or "unknown") .. '>')
+    table.insert(lines, '<helperPayrollLedgerIndex' .. hpayXmlAttr("version", tostring(self.VERSION or "0.3.3.0")) .. hpayXmlAttr("savegame", self.persistence ~= nil and self.persistence.savegameName or "unknown") .. '>')
     table.insert(lines, '  <summary' .. hpayXmlAttr("jobs", s.jobs or 0) .. hpayXmlAttr("hours", string.format("%.3f", tonumber(s.hours) or 0)) .. hpayXmlAttr("labour", string.format("%.2f", tonumber(s.labour) or 0)) .. hpayXmlAttr("calculated", string.format("%.2f", tonumber(s.calculated) or 0)) .. hpayXmlAttr("charged", string.format("%.2f", tonumber(s.charged) or 0)) .. hpayXmlAttr("minimumJobs", s.minimumJobs or 0) .. hpayXmlAttr("payments", s.payments or 0) .. ' />')
     table.insert(lines, '  <periods>')
     for _, id in ipairs(idx.periodOrder or {}) do
@@ -3058,6 +3818,10 @@ function HelperPayroll:loadPeriodLedger(periodId)
                     entryType = hpayXmlGetString(xmlFile, key .. "#entryType", "job"),
                     status = hpayXmlGetString(xmlFile, key .. "#status", "charged"),
                     gameDate = hpayXmlGetString(xmlFile, key .. "#gameDate", "unknown"),
+                    workMonotonicDay = hpayXmlGetOptionalInt(xmlFile, key .. "#workMonotonicDay"),
+                    workDayTime = hpayXmlGetOptionalFloat(xmlFile, key .. "#workDayTime"),
+                    paidMonotonicDay = hpayXmlGetOptionalInt(xmlFile, key .. "#paidMonotonicDay"),
+                    paidDayTime = hpayXmlGetOptionalFloat(xmlFile, key .. "#paidDayTime"),
                     realDate = hpayXmlGetString(xmlFile, key .. "#realDate", ""),
                     billingMode = hpayXmlGetString(xmlFile, key .. "#billingMode", ""),
                     payrollMode = hpayXmlGetString(xmlFile, key .. "#payrollMode", ""),
@@ -3065,6 +3829,10 @@ function HelperPayroll:loadPeriodLedger(periodId)
                     role = hpayXmlGetString(xmlFile, key .. "#role", ""),
                     helper = hpayXmlGetString(xmlFile, key .. "#helper", ""),
                     helperSlot = hpayXmlGetString(xmlFile, key .. "#helperSlot", ""),
+                    helperIdentityId = hpayXmlGetString(xmlFile, key .. "#helperIdentityId", ""),
+                    helperIdentitySource = hpayXmlGetString(xmlFile, key .. "#helperIdentitySource", ""),
+                    helperMappingSource = hpayXmlGetString(xmlFile, key .. "#helperMappingSource", ""),
+                    assignmentSnapshotSource = hpayXmlGetString(xmlFile, key .. "#assignmentSnapshotSource", ""),
                     helperSlotUsedForPayroll = tostring(hpayXmlGetBool(xmlFile, key .. "#helperSlotUsedForPayroll", false)),
                     workerRate = hpayXmlGetString(xmlFile, key .. "#workerRate", ""),
                     rate = tostring(hpayXmlGetFloat(xmlFile, key .. "#rate", 0)),
@@ -3101,10 +3869,10 @@ function HelperPayroll:savePeriodLedger(periodId)
     if path == nil then return false end
     local lines = {}
     table.insert(lines, '<?xml version="1.0" encoding="utf-8" standalone="no" ?>')
-    table.insert(lines, '<helperPayrollLedger' .. hpayXmlAttr("version", "0.2.3.6") .. hpayXmlAttr("period", periodId) .. hpayXmlAttr("savegame", self.persistence ~= nil and self.persistence.savegameName or "unknown") .. '>')
+    table.insert(lines, '<helperPayrollLedger' .. hpayXmlAttr("version", tostring(self.VERSION or "0.3.3.0")) .. hpayXmlAttr("period", periodId) .. hpayXmlAttr("savegame", self.persistence ~= nil and self.persistence.savegameName or "unknown") .. '>')
     for i, e in ipairs(entries or {}) do
         local attrs = ''
-        local names = {"id","entryType","status","gameDate","realDate","billingMode","payrollMode","profile","role","helper","helperSlot","helperSlotUsedForPayroll","workerRate","rate","elapsedHours","labour","callout","minimum","minimumApplied","calculated","charged","farmId","jobType","sequence"}
+        local names = {"id","entryType","status","gameDate","workMonotonicDay","workDayTime","paidMonotonicDay","paidDayTime","realDate","billingMode","payrollMode","profile","role","helper","helperSlot","helperIdentityId","helperIdentitySource","helperMappingSource","assignmentSnapshotSource","helperSlotUsedForPayroll","workerRate","rate","elapsedHours","labour","callout","minimum","minimumApplied","calculated","charged","farmId","jobType","sequence"}
         for _, name in ipairs(names) do
             if e[name] ~= nil then attrs = attrs .. hpayXmlAttr(name, e[name]) end
         end
@@ -3171,6 +3939,8 @@ function HelperPayroll:buildPersistentLedgerEntryFromWorkerEntry(entry, status)
         entryType = "job",
         status = status or (tonumber(entry.charge) ~= nil and tonumber(entry.charge) > 0 and "charged" or "recorded"),
         gameDate = entry.gameDate,
+        workMonotonicDay = entry.workMonotonicDay,
+        workDayTime = entry.workDayTime,
         realDate = hpayRealTimestamp(),
         billingMode = entry.billingMode,
         payrollMode = entry.payrollMode,
@@ -3178,6 +3948,10 @@ function HelperPayroll:buildPersistentLedgerEntryFromWorkerEntry(entry, status)
         role = entry.helperRole,
         helper = entry.helperName,
         helperSlot = entry.helperSlot,
+        helperIdentityId = entry.helperIdentityId,
+        helperIdentitySource = entry.helperIdentitySource,
+        helperMappingSource = entry.helperMappingSource,
+        assignmentSnapshotSource = entry.assignmentSnapshotSource,
         helperSlotUsedForPayroll = tostring(entry.helperSlotUsedForPayroll == true),
         workerRate = entry.workerId,
         rate = string.format("%.2f", tonumber(entry.hourlyRate) or 0),
@@ -3200,6 +3974,10 @@ function HelperPayroll:recordPersistentDailyPayment(daily, charge, minimumApplie
         entryType = "payment",
         status = "paid",
         gameDate = daily.gameDate or self:getGameDateKey(),
+        workMonotonicDay = daily.workMonotonicDay,
+        workDayTime = daily.workDayTime,
+        paidMonotonicDay = daily.paidMonotonicDay,
+        paidDayTime = daily.paidDayTime,
         realDate = hpayRealTimestamp(),
         billingMode = "dailyPayroll",
         payrollMode = self.settings.payrollMode,
@@ -3207,6 +3985,9 @@ function HelperPayroll:recordPersistentDailyPayment(daily, charge, minimumApplie
         role = daily.helperRole,
         helper = daily.helperName,
         helperSlot = daily.helperSlot,
+        helperIdentityId = daily.helperIdentityId,
+        helperIdentitySource = daily.helperIdentitySource,
+        helperMappingSource = daily.helperMappingSource,
         helperSlotUsedForPayroll = "",
         workerRate = daily.workerId,
         rate = string.format("%.2f", tonumber(daily.hourlyRate) or 0),
@@ -3230,7 +4011,7 @@ function HelperPayroll:buildLedgerSummaryLines()
     local s = idx.summary or {}
     local lines = {}
     table.insert(lines, "HelperPayroll Persistent Ledger Summary")
-    table.insert(lines, "Version: 0.2.3.6")
+    table.insert(lines, "Version: " .. tostring(self.VERSION or "0.3.3.0"))
     table.insert(lines, string.format("Savegame: %s", tostring(self.persistence ~= nil and self.persistence.savegameName or "unknown")))
     table.insert(lines, string.format("Ledger index: %s", tostring(self.ledger ~= nil and self.ledger.indexPath or "unknown")))
     table.insert(lines, string.format("Totals: jobs=%d payments=%d hours=%.3f labour=%s calculated=%s charged=%s minimumJobs=%d",
@@ -3292,7 +4073,7 @@ function HelperPayroll:printLedgerJobs(limit, periodId)
     hpayPrintf("Persistent payroll entries: period=%s showing %d-%d of %d", tostring(periodId), first, count, count)
     for i = first, count do
         local e = entries[i]
-        hpayPrintf("%03d id=%s type=%s status=%s date=%s helper=%s role=%s workerRate=%s hours=%s rate=%s labour=%s calculated=%s charged=%s", i, tostring(e.id), tostring(e.entryType), tostring(e.status), tostring(e.gameDate), tostring(e.helper), tostring(e.role), tostring(e.workerRate), hpFmtHours(e.elapsedHours), hpFmtRate(e.rate), hpFmtMoney(e.labour), hpFmtMoney(e.calculated), hpFmtMoney(e.charged))
+        hpayPrintf("%03d id=%s type=%s status=%s date=%s helper=%s identityId=%s role=%s workerRate=%s hours=%s rate=%s labour=%s calculated=%s charged=%s", i, tostring(e.id), tostring(e.entryType), tostring(e.status), tostring(e.gameDate), tostring(e.helper), tostring(e.helperIdentityId or "-"), tostring(e.role), tostring(e.workerRate), hpFmtHours(e.elapsedHours), hpFmtRate(e.rate), hpFmtMoney(e.labour), hpFmtMoney(e.calculated), hpFmtMoney(e.charged))
     end
 end
 
@@ -3323,7 +4104,7 @@ function HelperPayroll:buildSessionReportLines()
     local roleId, roleName, rate, profileId = self:getSelectedRoleInfo()
 
     table.insert(lines, "HelperPayroll Report")
-    table.insert(lines, string.format("Version: 0.2.3.6"))
+    table.insert(lines, string.format("Version: %s", tostring(self.VERSION or "0.3.3.0")))
     table.insert(lines, string.format("Savegame: %s", tostring(self.persistence ~= nil and self.persistence.savegameName or "unknown")))
     table.insert(lines, string.format("Game date: %s", tostring(dateKey)))
     table.insert(lines, string.format("Payroll mode: %s", tostring(self.settings.payrollMode)))
@@ -3437,12 +4218,13 @@ function HelperPayroll:printRecentJobs(limit)
     for i = first, count do
         local e = self.workerLedger[i]
         if e ~= nil then
-            hpayPrintf("%02d seq=%s date=%s type=%s helper=%s role=%s workerRate=%s hours=%.3f rate=%.2f labour=%.2f calculated=%.2f charged=%.2f billingMode=%s",
+            hpayPrintf("%02d seq=%s date=%s type=%s helper=%s identityId=%s role=%s workerRate=%s hours=%.3f rate=%.2f labour=%.2f calculated=%.2f charged=%.2f billingMode=%s",
                 i,
                 tostring(e.sequence),
                 tostring(e.gameDate),
                 tostring(e.jobType),
                 tostring(e.helperName),
+                tostring(e.helperIdentityId or "-"),
                 tostring(e.helperRole),
                 tostring(e.workerId),
                 tonumber(e.elapsedHours) or 0,
@@ -3748,6 +4530,92 @@ function HelperPayroll:hpayRole(...)
 end
 
 
+function HelperPayroll:hpayProfiles(...)
+    local a = hpayNormalizeArgs(...)
+    a = string.lower(tostring(a or "status"))
+
+    if a == "help" or a == "" then
+        hpayPrintf("hpayProfiles commands:")
+        hpayPrintf("  status              show HelperProfiles mod/API integration status")
+        hpayPrintf("  slots               list HelperProfiles A-J identities and HelperPayroll slot mappings")
+        hpayPrintf("  refresh             refresh and display integration status")
+        return
+    end
+
+    if a == "refresh" or a == "reload" then
+        a = "status"
+    end
+
+    local status = self:getHelperProfilesStatus()
+
+    if a == "status" then
+        hpayPrintf(
+            "HelperProfiles integration: available=%s modLoaded=%s detection=%s apiAvailable=%s source=%s payrollMode=%s profile=%s standaloneRoleInputsSuppressed=%s",
+            tostring(status.available == true),
+            tostring(status.modLoaded == true),
+            tostring(status.detectionSource or "none"),
+            tostring(status.apiAvailable == true),
+            tostring(status.source),
+            tostring(self.settings.payrollMode),
+            tostring(self.settings.activePayrollProfile),
+            tostring(self:shouldSuppressStandaloneRoleInputs())
+        )
+        hpayPrintf(
+            "HelperProfiles API: apiVersion=%s modVersion=%s profiles=%d selectedSlot=%s selectedName=%s pickMode=%s",
+            tostring(status.apiVersion or "-"),
+            tostring(status.helperProfilesVersion or "-"),
+            tonumber(status.profileCount) or 0,
+            tostring(status.selectedSlot or "-"),
+            tostring(status.selectedName or "-"),
+            tostring(status.pickMode or "-")
+        )
+
+        if self:shouldSuppressStandaloneRoleInputs() then
+            hpayPrintf("HelperProfiles owns ';' and modified ';' controls. HelperPayroll standalone role cycle/list keybinds are suppressed for this session.")
+        end
+
+        if status.available then
+            if self:isHelperSlotPayrollMode() then
+                hpayPrintf("helperSlot mode active. job.helperIndex selects A-J; HelperProfiles API supplies live identity and HelperPayroll applies the per-save identity/slot payroll mapping.")
+            else
+                hpayPrintf("HelperProfiles is integrated, but roleType mode remains active and uses the selected payroll role.")
+            end
+        elseif status.modLoaded then
+            hpayPrintf("HelperProfiles is loaded but does not expose the required shared API. Install/update the API-enabled HelperProfiles build.")
+            hpayPrintf("HelperPayroll standalone roleType mode remains available.")
+        else
+            hpayPrintf("HelperProfiles is not enabled in this game session. HelperPayroll standalone roleType mode remains available.")
+        end
+        return
+    elseif a == "slots" or a == "list" then
+        local _, profileId = self:getActiveProfile()
+        hpayPrintf("HelperProfiles/HelperPayroll slot mapping: profile=%s payrollMode=%s source=%s", tostring(profileId), tostring(self.settings.payrollMode), tostring(status.source))
+        for i = 1, 10 do
+            local slot = string.char(string.byte("A") + i - 1)
+            local hpInfo = self:getHelperProfilesSlotInfo(slot)
+            local hpName = hpInfo ~= nil and hpInfo.displayName or ("Helper " .. slot)
+            local identityId = hpInfo ~= nil and hpInfo.identityId or ("slot:" .. slot)
+            local workerRate, mapping, mappingSource = self:getEffectiveHelperProfilesRole(hpInfo, slot, profileId)
+            local worker = self:getWorkerRateById(profileId, workerRate)
+            local rate = worker ~= nil and tonumber(worker.hourlyRate) or 0
+            local marker = hpInfo ~= nil and hpInfo.selected and " *selected" or ""
+            hpayPrintf(
+                "  %s  HelperProfiles=%s  identityId=%s  mappingSource=%s  workerRate=%s  rate=%.2f%s",
+                slot,
+                tostring(hpName),
+                tostring(identityId),
+                tostring(mappingSource),
+                tostring(workerRate),
+                tonumber(rate) or 0,
+                marker
+            )
+        end
+        return
+    end
+
+    hpayPrintf("Unknown hpayProfiles subcommand '%s' (try: hpayProfiles help)", tostring(a))
+end
+
 function HelperPayroll:getPolicyTemplateStatusValues()
     self:initPolicyConfigPaths()
     local path = self.policyConfig ~= nil and self.policyConfig.activePath or self.CONFIG_FILE
@@ -3804,8 +4672,8 @@ function HelperPayroll:printSaveSettingsStatus()
         tostring(self.persistence ~= nil and self.persistence.savegameName or "unknown"),
         tostring(self.persistence ~= nil and self.persistence.filePath or "nil"),
         tostring(self.persistence ~= nil and self.persistence.loaded == true))
-    hpayPrintf("Effective active values: payrollMode=%s billingMode=%s profile=%s selectedRole=%s name=%s rate=%.2f fallbackRole=%s minimum=%.2f callout=%.2f payrollHour=%s round=%s",
-        tostring(self.settings.payrollMode), tostring(self.settings.billingMode), tostring(profileId), tostring(roleId), tostring(roleName), tonumber(rate) or 0, tostring(self.settings.fallbackRole), tonumber(self.settings.minimumWorkerCharge) or 0, tonumber(self.settings.workerCalloutFee) or 0, tostring(self.settings.payrollHour), tostring(self.settings.roundWorkerCharges))
+    hpayPrintf("Effective active values: payrollMode=%s billingMode=%s profile=%s selectedRole=%s name=%s rate=%.2f fallbackRole=%s minimum=%.2f callout=%.2f payrollHour=%s round=%s helperProfilesMappings=%d",
+        tostring(self.settings.payrollMode), tostring(self.settings.billingMode), tostring(profileId), tostring(roleId), tostring(roleName), tonumber(rate) or 0, tostring(self.settings.fallbackRole), tonumber(self.settings.minimumWorkerCharge) or 0, tonumber(self.settings.workerCalloutFee) or 0, tostring(self.settings.payrollHour), tostring(self.settings.roundWorkerCharges), #(self.helperProfilesMappings or {}))
 end
 
 function HelperPayroll:hpayConfig(...)
@@ -3875,6 +4743,8 @@ function HelperPayroll:hpaySave(...)
         return
     elseif a == "reset" then
         self:loadConfig()
+        self.helperProfilesMappings = {}
+        self:rebuildHelperProfilesMappingIndexes()
         self:saveSavegameSettings("save-reset-from-global-policy")
         self:loadSavegameSettings()
         hpayPrintf("Current save payroll settings reset from global/default policy")
@@ -3896,6 +4766,7 @@ function HelperPayroll:hpayDump(...)
         hpayPrintf("  ledger              print current ledger totals")
         hpayPrintf("  report              print payroll report summary")
         hpayPrintf("  config              print global/default policy and current save settings")
+        hpayPrintf("  clock               print authoritative payroll clock and pending-row due state")
         return
     elseif a == "roles" then
         return self:hpayRole("list")
@@ -3912,11 +4783,29 @@ function HelperPayroll:hpayDump(...)
         self:printPolicyTemplateStatus()
         self:printSaveSettingsStatus()
         return
+    elseif a == "clock" then
+        local clock = self:getGameClockSnapshot()
+        local payrollHour = tonumber(self.settings.payrollHour) or 18
+        hpayPrintf("Payroll clock: date=%s monotonicDay=%s dayTimeMs=%s hour=%s payrollHour=%s pendingRows=%d",
+            tostring(clock.dateKey), tostring(clock.monotonicDay), tostring(clock.dayTimeMs), tostring(clock.hour), tostring(payrollHour), self:countPendingDailyPayrollRows())
+        for key, daily in pairs(self.workerDailyLedger or {}) do
+            if daily ~= nil and daily.payrollApplied ~= true and (tonumber(daily.jobs) or 0) > 0 then
+                local due, reason = self:isDailyPayrollRowDue(daily, clock, payrollHour)
+                hpayPrintf("  pending key=%s helper=%s workDate=%s workMonotonicDay=%s jobs=%d labour=%.2f due=%s reason=%s",
+                    tostring(key), tostring(daily.helperName), tostring(daily.gameDate), tostring(self:getStoredWorkMonotonicDay(daily)), tonumber(daily.jobs) or 0, tonumber(daily.labour) or 0, tostring(due), tostring(reason))
+            end
+        end
+        return
     elseif a == "status" or a == "" then
         local roleId, roleName, rate, profileId = self:getSelectedRoleInfo()
-        hpayPrintf("Status: version=0.2.3.6 payrollMode=%s profile=%s selectedRole=%s name=%s rate=%.2f roleListVisible=%s reportOverlayVisible=%s reportPage=%s trackedJobs=%d billingMode=%s saveFile=%s globalPolicySource=%s globalPolicyFile=%s",
-            tostring(self.settings.payrollMode), tostring(profileId), tostring(roleId), tostring(roleName), tonumber(rate) or 0,
-            tostring(self.roleListVisible == true), tostring(self.reportOverlayVisible == true), tostring(self.reportOverlayPage or 1), tonumber(self.trackedAIJobCount) or 0, tostring(self.settings.billingMode), tostring(self.persistence ~= nil and self.persistence.filePath or "nil"), tostring(self.policyConfig ~= nil and self.policyConfig.source or "unknown"), tostring(self.CONFIG_FILE))
+        local hpStatus = self:getHelperProfilesStatus()
+        hpayPrintf("Status: version=%s channel=%s payrollMode=%s billingMode=%s profile=%s selectedRole=%s name=%s rate=%.2f trackedJobs=%d pendingRows=%d helperProfilesLoaded=%s helperProfilesApi=%s helperProfilesApiVersion=%s roleListVisible=%s reportOverlayVisible=%s reportPage=%s saveFile=%s globalPolicySource=%s globalPolicyFile=%s",
+            tostring(self.VERSION or "0.3.3.0"), tostring(self.RELEASE_CHANNEL or "beta-rc"),
+            tostring(self.settings.payrollMode), tostring(self.settings.billingMode), tostring(profileId), tostring(roleId), tostring(roleName), tonumber(rate) or 0,
+            tonumber(self.trackedAIJobCount) or 0, self:countPendingDailyPayrollRows(),
+            tostring(hpStatus.modLoaded == true), tostring(hpStatus.apiAvailable == true), tostring(hpStatus.apiVersion or "-"),
+            tostring(self.roleListVisible == true), tostring(self.reportOverlayVisible == true), tostring(self.reportOverlayPage or 1),
+            tostring(self.persistence ~= nil and self.persistence.filePath or "nil"), tostring(self.policyConfig ~= nil and self.policyConfig.source or "unknown"), tostring(self.CONFIG_FILE))
         return
     end
 
@@ -3953,13 +4842,49 @@ function HelperPayroll:registerConsoleCommands()
     hpayRegisterConsoleCommand("hpayReport", "Print or export HelperPayroll payroll reports", "hpayReport")
     hpayRegisterConsoleCommand("hpayConfig", "Inspect or reload HelperPayroll global/default policy config", "hpayConfig")
     hpayRegisterConsoleCommand("hpaySave", "Inspect or reload HelperPayroll current save settings", "hpaySave")
+    hpayRegisterConsoleCommand("hpayProfiles", "Inspect HelperProfiles integration status", "hpayProfiles")
     self.consoleCommandsRegistered = true
-    rcLog("Registered console commands: hpayOverlay, hpayRole, hpayDump, hpayReport, hpayConfig, hpaySave")
+    rcLog("Registered console commands: hpayOverlay, hpayRole, hpayDump, hpayReport, hpayConfig, hpaySave, hpayProfiles")
 end
 
 function HelperPayroll:installMoneyHooks()
     -- Legacy diagnostic retained only as a fallback marker. FS25 helper suppression is now done through AIJob.getPricePerMs hooks.
     rcLog("Farm.addMoney hook skipped. Using AIJob.getPricePerMs suppression for vanilla helper costs.")
+end
+
+function HelperPayroll:logRuntimeStartupStatus()
+    local hpStatus = self:getHelperProfilesStatus()
+    local apiState = hpStatus.apiAvailable and "available" or (hpStatus.modLoaded and "pending-or-unavailable" or "not-loaded")
+    rcLog(
+        "Runtime status: version=%s channel=%s payrollMode=%s billingMode=%s profile=%s pendingRows=%d HelperProfilesLoaded=%s HelperProfilesAPI=%s apiVersion=%s helperProfilesVersion=%s selectedSlot=%s selectedName=%s savegame=%s",
+        tostring(self.VERSION or "0.3.3.0"),
+        tostring(self.RELEASE_CHANNEL or "beta-rc"),
+        tostring(self.settings.payrollMode),
+        tostring(self.settings.billingMode),
+        tostring(self.settings.activePayrollProfile or "default"),
+        self:countPendingDailyPayrollRows(),
+        tostring(hpStatus.modLoaded == true),
+        tostring(apiState),
+        tostring(hpStatus.apiVersion or "-"),
+        tostring(hpStatus.helperProfilesVersion or "-"),
+        tostring(hpStatus.selectedSlot or "-"),
+        tostring(hpStatus.selectedName or "-"),
+        tostring(self.persistence ~= nil and self.persistence.savegameName or "unknown")
+    )
+end
+
+function HelperPayroll:processStartupStatus(dt)
+    if self.startupStatusLogged == true or self.isInitialized ~= true then
+        return
+    end
+
+    self.startupStatusElapsedMs = (self.startupStatusElapsedMs or 0) + (tonumber(dt) or 0)
+    if self.startupStatusElapsedMs < (self.startupStatusDelayMs or 1500) then
+        return
+    end
+
+    self.startupStatusLogged = true
+    self:logRuntimeStartupStatus()
 end
 
 function HelperPayroll:initialize(reason)
@@ -3969,11 +4894,17 @@ function HelperPayroll:initialize(reason)
     end
 
     rcLog("Initializing. reason=%s modName=%s modDirectory=%s", tostring(reason), tostring(self.MOD_NAME), tostring(self.MOD_DIRECTORY))
+    self.lastPayrollClockDay = nil
+    self.lastPayrollClockHour = nil
+    self.lastPayrollClockDayTime = nil
+    self.startupStatusElapsedMs = 0
+    self.startupStatusLogged = false
     self:loadConfig()
     self:loadSavegameSettings()
     self:loadLedgerIndex()
     if self.ledger ~= nil and self.ledger.hasIndexFile == true then
         self:loadPeriodLedger(self:getLedgerPeriodId(self:getGameDateKey()))
+        self:recoverPendingDailyPayrollFromLedger()
     else
         rcLog("Persistent payroll ledger period load skipped until index exists")
     end
@@ -3998,8 +4929,9 @@ function HelperPayroll:loadMap(name)
 end
 
 function HelperPayroll:onUpdate(dt)
+    self:processStartupStatus(dt)
     self:scanActiveAIJobs(dt)
-    self:processDailyPayroll(dt)
+    self:processDailyPayroll(dt, false, "onUpdate")
     if self.roleFlashTime ~= nil and self.roleFlashTime > 0 then
         self.roleFlashTime = math.max(0, self.roleFlashTime - ((tonumber(dt) or 0) / 1000))
     end
@@ -4007,8 +4939,9 @@ end
 
 function HelperPayroll:update(dt)
     -- Some FS script contexts call update instead of onUpdate.
+    self:processStartupStatus(dt)
     self:scanActiveAIJobs(dt)
-    self:processDailyPayroll(dt)
+    self:processDailyPayroll(dt, false, "update")
     if self.roleFlashTime ~= nil and self.roleFlashTime > 0 then
         self.roleFlashTime = math.max(0, self.roleFlashTime - ((tonumber(dt) or 0) / 1000))
     end

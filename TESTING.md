@@ -1,6 +1,34 @@
-# FS25_HelperPayroll Alpha Testing Notes
+# FS25_HelperPayroll Beta Release Candidate Testing Notes
 
-Current build: **v0.2.3.6 Alpha Baseline**
+Current build: **v0.3.3.0 Beta Release Candidate**
+
+## v0.3.3.0 beta release-candidate validation
+
+### Baseline startup
+
+1. Load with HelperProfiles enabled and confirm one delayed `Runtime status` line reports the API state.
+2. Run `hpayDump status` and verify version `0.3.3.0`, channel `beta-rc`, billing mode, pending-row count and HelperProfiles API version.
+3. Confirm normal logging does not print a `Daily payroll check` line for every in-game hour.
+4. Set global policy `logLevel` to `debug`, reload the config, and confirm detailed clock checks return.
+
+### Required scheduler edge cases
+
+1. **Overdue next day:** finish a daily-payroll job before payroll, advance into the next game day, and confirm `reason=overdue-day`.
+2. **Save/reload:** finish a job, save before settlement, reload, and confirm the pending row remains and settles once.
+3. **Multiple workers:** run at least three named workers at different rates and confirm one daily payment per identity.
+4. **Identity movement:** move an AvatarSwitcher-bound HelperProfiles identity to another A-J slot and confirm its saved payroll role follows the identity.
+5. **Duplicate guard:** reload after a payment and confirm no second payment is created for the same worker/workday.
+6. **Standalone fallback:** disable HelperProfiles and confirm `;` and `RCTRL + ;` return to HelperPayroll.
+
+### Evidence to capture
+
+- `hpayDump status`
+- `hpayDump clock` before and after settlement
+- job-start assignment line
+- deferred ledger line
+- daily settlement and summary lines
+- ledger totals after reload
+
 
 ## 1. Basic load test
 
@@ -13,7 +41,8 @@ Expected log entries:
 [HelperPayroll] Worker billing settings: ... payrollMode=roleType ... selectedRole=...
 [HelperPayroll] Loaded savegame persistence: ...
 [HelperPayroll] AI worker price suppression installed. Hook count=3
-[HelperPayroll] Registered console commands: hpayOverlay, hpayRole, hpayDump, hpayReport, hpayConfig, hpaySave
+[HelperPayroll] Registered console commands: hpayOverlay, hpayRole, hpayDump, hpayReport, hpayConfig, hpaySave, hpayProfiles
+[HelperPayroll] Runtime status: version=0.3.3.0 channel=beta-rc ...
 ```
 
 First-run saves may also show:
@@ -280,7 +309,7 @@ Please include:
 8. Confirm role list, report overlay, payroll billing, and persistent ledger still work.
 
 
-## v0.2.3.6 alpha baseline config/status test
+## v0.3.0.0 alpha baseline config/status test
 
 1. Open management UI with `RCTRL + H`.
 2. Change one Billing setting or one role hourly rate.
@@ -293,3 +322,97 @@ Please include:
 8. Run `hpayConfig status` and confirm it reports only the global/default policy.
 9. Run `hpaySave status` and confirm it reports the current-save/effective values.
 10. Confirm both commands make the config source clear and do not mix the two layers.
+
+
+## v0.3.0.0 HelperProfiles integration smoke test
+
+1. Load HelperPayroll without HelperProfiles and run `hpayProfiles status`; it should report unavailable and standalone mode available.
+2. Load HelperProfiles and HelperPayroll together.
+3. Run `hpayProfiles status`; it should detect HelperProfiles and report selected slot/name if available.
+4. Run `hpayProfiles slots`; it should list A-J HelperProfiles names and HelperPayroll slot mappings.
+5. In `roleType` mode, start a helper and confirm payroll still uses the selected HelperPayroll role.
+6. Switch to `helperSlot` mode in the current-save settings, configure slot mappings, start a helper selected through HelperProfiles, and confirm the job log shows `helperSlotUsedForPayroll=true` and `identitySource=HelperProfiles` where applicable.
+
+## v0.3.0.1 legacy HelperProfiles XML bridge test (superseded)
+
+1. Enable HelperProfiles and load a save with per-save appearance bindings.
+2. Run `hpayProfiles status`.
+3. Confirm `available=true`, `appearance links: loaded=true`, and the file points to `FS25_HelperProfiles/saves/<savegame>/appearanceLinks.xml`.
+4. Run `hpayProfiles slots`.
+5. Confirm bound A-J slots show HelperProfiles display names.
+6. In `roleType` mode, confirm the selected payroll role remains authoritative.
+7. In `helperSlot` mode, start a worker and confirm `job.helperIndex` resolves the A-J slot while the XML supplies the display name.
+
+## HelperProfiles shared API integration
+
+With HelperProfiles 2.0.23+ enabled:
+
+1. Load a save with HelperProfiles and HelperPayroll enabled.
+2. Confirm HelperProfiles logs that its optional shared API was published.
+3. Run `hpayProfiles status`; expect `modLoaded=true`, `apiAvailable=true`, and `source=shared-api`.
+4. Run `hpayProfiles slots`; confirm A-J identities match the live HelperProfiles overlay/menu.
+5. In `roleType` mode, start a worker and confirm the selected payroll role remains authoritative.
+6. In `helperSlot` mode, start a worker and confirm `job.helperIndex` selects A-J while HelperProfiles supplies the display name.
+7. Disable HelperProfiles and reload; confirm HelperPayroll remains functional and reports standalone mode.
+
+The test must not depend on `appearanceLinks.xml` being present.
+
+
+## v0.3.1.0 HelperProfiles payroll mapping test
+
+1. Enable HelperPayroll 0.3.1.0 and HelperProfiles 2.0.23.0.
+2. Run `hpayProfiles status`; confirm API v2 is available.
+3. Open HelperPayroll management and select **WORKERS**.
+4. Confirm live names appear for bound HelperProfiles slots.
+5. Assign different roles to at least two workers and press APPLY.
+6. Confirm `helperPayrollSettings.xml` contains `helperProfilesMappings`.
+7. Set Billing > Payroll mode to `helperSlot` and APPLY.
+8. Select/deploy one mapped helper through HelperProfiles.
+9. Confirm the AI job log includes the expected identityId, mappingSource, role, and rate.
+10. Finish the job and confirm the period ledger snapshots the helper identity fields.
+11. Reload the save and confirm WORKERS mappings persist.
+12. Move an AvatarSwitcher-bound identity to another slot, reload HelperProfiles data, and confirm the identity mapping follows the preset identity.
+
+## v0.3.1.1 HelperProfiles input handoff test
+
+### With HelperProfiles enabled
+
+1. Load HelperProfiles API v2 and HelperPayroll 0.3.1.1.
+2. Run `hpayProfiles status`.
+3. Confirm `standaloneRoleInputsSuppressed=true`.
+4. Confirm the log reports standalone role selector suppression for player/vehicle context.
+5. Press `;` and confirm only HelperProfiles changes its selected helper.
+6. Press `RCTRL + ;` and confirm only the HelperProfiles overlay opens/closes.
+7. Confirm `RCTRL + H` still opens HelperPayroll management.
+8. Confirm `RCTRL + P` still opens the payroll report overlay.
+
+### Without HelperProfiles enabled
+
+1. Load HelperPayroll alone.
+2. Confirm `;` cycles the standalone payroll role.
+3. Confirm `RCTRL + ;` opens/closes the standalone payroll role list.
+
+
+
+## v0.3.2.0 stable identity and daily payroll test
+
+1. Install HelperProfiles 2.0.24.0 and HelperPayroll 0.3.2.0.
+2. Set HelperPayroll to `helperSlot` and `dailyPayroll` modes.
+3. Start two or more named HelperProfiles workers in succession or concurrently.
+4. Confirm each `AI job detected` line reports the correct A-J slot, `identityId`, display name, role and rate with `assignmentSnapshot=job-start`.
+5. Stop the workers and confirm each deferred entry retains the same identity and rate shown at job start.
+6. Save/reload before payroll and confirm `Loaded pending daily payroll rows` is logged.
+7. Advance to the next game day before the configured payroll hour.
+8. Confirm overdue rows are charged once and removed from pending storage.
+9. Reload again and confirm no duplicate payment occurs.
+
+Legacy migration check: a save containing deferred `dailyPayroll` ledger jobs from 0.3.1.x should log `Reconciled pending daily payroll from persistent ledger` and settle any genuinely unpaid rows.
+
+## v0.3.2.1 accelerated-time payroll test
+
+1. Complete a worker job before the configured payroll hour.
+2. Run `hpayDump clock` and confirm the row is `same-day-waiting`.
+3. Accelerate time through the payroll hour.
+4. Confirm `Daily payroll check` reports the changed hour and `Daily payroll settled` is logged.
+5. Repeat by advancing directly into the next day; the due reason should be `overdue-day`.
+6. Save and reload with a pending row and confirm it remains payable.

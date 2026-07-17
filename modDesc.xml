@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8" standalone="no" ?>
 <modDesc descVersion="110">
     <author>SimGamerJen</author>
-    <version>0.2.3.6</version>
+    <version>0.3.3.0</version>
     <title>
-        <en>Helper Payroll Alpha</en>
+        <en>Helper Payroll Beta</en>
     </title>
     <description>
-        <en>0.2.3.6 alpha: configurable AI helper payroll with a CCO-style management screen that applies gameplay changes to the current savegame settings.</en>
+        <en>0.3.3.0 beta release candidate: Configurable AI worker payroll with optional HelperProfiles identity integration, per-save worker mappings, persistent payroll history, job-start assignment snapshots, and accelerated-time-safe daily payroll.</en>
     </description>
     <iconFilename>HelperPayroll_icon.dds</iconFilename>
     <multiplayer supported="false" />

@@ -1,5 +1,119 @@
 # Changelog
 
+## 0.3.3.0 Beta Release Candidate — Release Hardening
+
+- Promotes the tested HelperProfiles and daily-payroll architecture into a beta release candidate.
+- Preserves the working 0.3.2.1 payroll scheduler and accounting behaviour.
+- Moves routine hour-by-hour payroll-clock messages behind `logLevel=debug`.
+- Retains settlement, persistence, job and warning logs at normal log level.
+- Adds a delayed consolidated startup status after optional integration APIs have had time to publish.
+- Expands `hpayDump status` with release channel, pending rows and HelperProfiles API state.
+- Clarifies management-screen wording for per-job versus per-worker/day minimums and callout fees.
+- Updates README, testing guidance and release notes for beta validation.
+- Keeps multiplayer and dedicated-server support disabled.
+
+## 0.3.2.1 Alpha — Authoritative Daily Payroll Clock
+
+- Uses `environment.currentMonotonicDay` as the authoritative payroll day.
+- Uses `environment.dayTime` as the authoritative in-game clock.
+- Runs payroll checks immediately when the game hour or monotonic day changes.
+- Runs an immediate due check after a job is deferred.
+- Persists the work monotonic day and day-time snapshot with pending rows and ledger entries.
+- Migrates older pending rows from their saved game-date key.
+- Adds `hpayDump clock` diagnostics for pending-row due state.
+
+## 0.3.2.0 Alpha — Stable Identity and Daily Payroll Recovery
+
+- Uses HelperProfiles API v3 stable A-J resolution instead of runtime helper-list position.
+- Captures an immutable worker/payroll assignment when each AI job starts.
+- Uses the captured identity, role and hourly rate when the job finishes.
+- Persists unpaid daily-payroll rows in the current save settings file.
+- Recovers legacy deferred daily-payroll jobs from the persistent ledger.
+- Reconciles pending rows against existing payment entries to prevent re-payment.
+- Pays overdue rows after the game advances to a later day, even before that day's payroll hour.
+- Retains the HelperProfiles semicolon input handoff and standalone behaviour.
+
+
+## 0.3.1.1 Alpha — HelperProfiles Input Handoff
+
+- Suppresses HelperPayroll's standalone `;` role-cycle action when HelperProfiles is loaded.
+- Suppresses HelperPayroll's `RCTRL + ;` role-list action when HelperProfiles is loaded.
+- Leaves the semicolon key family entirely to HelperProfiles for the current session.
+- Keeps management-menu and payroll-report shortcuts available.
+- Preserves standalone role controls when HelperProfiles is absent.
+- Adds suppression state to `hpayProfiles status`.
+
+## 0.3.1.0 Alpha — HelperProfiles Payroll Mappings
+
+- Added per-save HelperProfiles identity/slot payroll mappings.
+- Added WORKERS management UI page for assigning roles to A-J workers.
+- Added payrollMode editing to the Billing page.
+- Added identity-first mapping resolution with slot fallback.
+- Added helper identity and mapping source snapshots to persistent ledger entries.
+- Requires no hard dependency; standalone roleType mode remains available.
+
+## 0.3.0.2 Alpha
+- Replaced appearanceLinks.xml-based detection with an optional shared runtime API.
+- Detects whether HelperProfiles is enabled in the current game session.
+- Reads selected slot and A-J display names from HelperProfiles 2.0.22+ through `g_currentMission.helperProfilesAPI`.
+- Keeps standalone `roleType` mode fully functional without HelperProfiles.
+- Added clearer diagnostics for mod-loaded/API-unavailable states.
+
+## 0.3.0.1 Alpha
+- Added HelperProfiles per-save appearanceLinks.xml bridge for cross-mod worker identities.
+- Added `hpayProfiles reload` and clearer integration diagnostics.
+- Preserved standalone roleType behaviour.
+
+## 0.3.0.0 Alpha — HelperProfiles Integration
+
+- Added HelperProfiles runtime detection.
+- Added HelperProfiles slot identity lookup for helper slots A-J.
+- Added `hpayProfiles status` and `hpayProfiles slots` diagnostics.
+- In `helperSlot` mode, HelperPayroll can use HelperProfiles display names while preserving HelperPayroll slot role/rate mappings.
+- Preserved standalone `roleType` behaviour.
+
+## 0.3.0.0-alpha
+
+- Alpha baseline polish for the tested standalone/vanilla-friendly feature set.
+- Documented the final config split: global/default policy, per-save active settings, and per-save ledger history.
+- Documented `hpayConfig` vs `hpaySave` diagnostic responsibilities.
+- Updated testing notes and release notes for the current management UI and per-save settings model.
+- No intentional payroll calculation, ledger, UI behaviour, or config-precedence changes from `0.2.3.5`.
+
+## 0.2.3.5-alpha
+
+- Changed the CCO-style management UI apply behaviour to write gameplay settings to the current savegame's `helperPayrollSettings.xml` instead of the global `defaultPayrollConfig.xml`.
+- Added save-specific persistence for billing mode, payroll hour, minimum charge, callout fee, round charges, and active-profile role hourly rates.
+- Updated UI wording from global policy XML to current save payroll settings.
+- Changed the UI reset action to reset the current save from the global/default policy template without modifying the global template.
+
+## 0.2.3.3-alpha
+
+- Refined the CCO-style management UI.
+- Removed the right-hand settings/details pane.
+- Moved value changes into the main SmoothList table with inline left/right controls.
+- Kept APPLY/DISCARD close to the table and retained reload/reset/back behaviour.
+- No payroll calculation changes.
+
+## 0.2.3.1 - Alpha UI Hotfix
+- Fixed CCO-style management GUI load failure from missing selected-role helper.
+- Replaced missing `buttonExtra2` GUI profile reference.
+
+## 0.2.0.1 - Alpha Hotfix
+- Fixed Lua compiler error in the external policy config writer caused by a malformed newline string.
+- No gameplay behaviour changed from 0.2.0.0.
+
+## 0.2.0.1 - External Policy Config Alpha
+
+- Added an external player-editable payroll policy file at `modSettings/FS25_HelperPayroll/defaultPayrollConfig.xml`.
+- On first run, HelperPayroll generates the external policy config from bundled defaults.
+- The bundled `config/defaultPayrollConfig.xml` remains as the template and safe fallback.
+- Added `hpayConfig` console command with `status`, `path`, `reload`, and `reset`.
+- `hpayDump status` now reports policy config source/path.
+- Policy reload resets and reloads role/rate/helper-slot tables safely without duplicating entries.
+- Save-specific selected role, UI layout, and ledger data remain in the savegame-specific modSettings folder.
+- Payroll calculations, role list UI, report overlay, and persistent ledger behaviour are unchanged from `0.1.9.1`.
+
 ## 0.1.9.1 - Alpha Release Candidate Polish
 
 - Bumped mod version to `0.1.9.1`.

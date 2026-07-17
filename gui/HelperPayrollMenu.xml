@@ -15,14 +15,15 @@
             <Button profile="fs25_subCategorySelectorTabbedTab" id="subCategoryTabs[1]" text="OVERVIEW" onClick="onClickOverview"><ThreePartBitmap profile="fs25_subCategorySelectorTabbedTabBg" name="background"/></Button>
             <Button profile="fs25_subCategorySelectorTabbedTab" id="subCategoryTabs[2]" text="BILLING" onClick="onClickBilling"><ThreePartBitmap profile="fs25_subCategorySelectorTabbedTabBg" name="background"/></Button>
             <Button profile="fs25_subCategorySelectorTabbedTab" id="subCategoryTabs[3]" text="ROLES" onClick="onClickRoles"><ThreePartBitmap profile="fs25_subCategorySelectorTabbedTabBg" name="background"/></Button>
-            <Button profile="fs25_subCategorySelectorTabbedTab" id="subCategoryTabs[4]" text="LEDGER" onClick="onClickLedger"><ThreePartBitmap profile="fs25_subCategorySelectorTabbedTabBg" name="background"/></Button>
-            <Button profile="fs25_subCategorySelectorTabbedTab" id="subCategoryTabs[5]" text="HELP" onClick="onClickHelp"><ThreePartBitmap profile="fs25_subCategorySelectorTabbedTabBg" name="background"/></Button>
+            <Button profile="fs25_subCategorySelectorTabbedTab" id="subCategoryTabs[4]" text="WORKERS" onClick="onClickWorkers"><ThreePartBitmap profile="fs25_subCategorySelectorTabbedTabBg" name="background"/></Button>
+            <Button profile="fs25_subCategorySelectorTabbedTab" id="subCategoryTabs[5]" text="LEDGER" onClick="onClickLedger"><ThreePartBitmap profile="fs25_subCategorySelectorTabbedTabBg" name="background"/></Button>
+            <Button profile="fs25_subCategorySelectorTabbedTab" id="subCategoryTabs[6]" text="HELP" onClick="onClickHelp"><ThreePartBitmap profile="fs25_subCategorySelectorTabbedTabBg" name="background"/></Button>
         </BoxLayout>
         <ThreePartBitmap profile="fs25_lineSeparatorTopHighlighted" position="0px -57px"/>
 
         <GuiElement profile="fs25_subCategorySelectorTabbedContainer" id="hpayMainPage">
             <Bitmap position="-20px 150px" size="1525px 615px" imageColor="0.015 0.017 0.015 0.28"/>
-            <Text id="hintText" text="HelperPayroll management | Edit values directly in the table | APPLY writes current save payroll settings" position="0px 12px" size="1480px 25px" textSize="15px" textColor="0.55 0.63 0.50 1" textVerticalAlignment="middle" textAlignment="left"/>
+            <Text id="hintText" text="HelperPayroll management | Worker mappings are stored per save | APPLY writes current save payroll settings" position="0px 12px" size="1480px 25px" textSize="15px" textColor="0.55 0.63 0.50 1" textVerticalAlignment="middle" textAlignment="left"/>
 
             <Text id="bodyTextElement" text="" position="40px 150px" size="1480px 585px" textSize="16px" textColor="0.88 0.90 0.86 1" textVerticalAlignment="top" textAlignment="left" textMaxNumLines="36"/>
 
