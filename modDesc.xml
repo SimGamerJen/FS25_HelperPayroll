@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8" standalone="no" ?>
 <modDesc descVersion="110">
     <author>SimGamerJen</author>
-    <version>0.1.9.1</version>
+    <version>0.2.3.6</version>
     <title>
         <en>Helper Payroll Alpha</en>
     </title>
     <description>
-        <en>Alpha release candidate: configurable AI helper payroll with a HelperProfiles-style role list overlay, semicolon role cycling, vanilla role-type mode, persistent payroll ledger, console/export reports, and a basic in-game payroll report overlay.</en>
+        <en>0.2.3.6 alpha: configurable AI helper payroll with a CCO-style management screen that applies gameplay changes to the current savegame settings.</en>
     </description>
     <iconFilename>HelperPayroll_icon.dds</iconFilename>
     <multiplayer supported="false" />
@@ -21,12 +21,16 @@
         <text name="input_HELPERPAYROLL_TOGGLE_REPORT_OVERLAY">
             <en>Helper Payroll: Toggle Report Overlay</en>
         </text>
+        <text name="input_HELPERPAYROLL_TOGGLE_MANAGEMENT_MENU">
+            <en>Helper Payroll: Management Menu</en>
+        </text>
     </l10n>
 
     <actions>
         <action name="HELPERPAYROLL_CYCLE_ROLE" category="ONFOOT VEHICLE" axisType="HALF" />
         <action name="HELPERPAYROLL_TOGGLE_ROLE_LIST" category="ONFOOT VEHICLE" axisType="HALF" />
         <action name="HELPERPAYROLL_TOGGLE_REPORT_OVERLAY" category="ONFOOT VEHICLE" axisType="HALF" />
+        <action name="HELPERPAYROLL_TOGGLE_MANAGEMENT_MENU" category="ONFOOT VEHICLE" axisType="HALF" />
     </actions>
 
     <inputBinding>
@@ -39,9 +43,13 @@
         <actionBinding action="HELPERPAYROLL_TOGGLE_REPORT_OVERLAY">
             <binding device="KB_MOUSE_DEFAULT" input="KEY_rctrl KEY_p" />
         </actionBinding>
+        <actionBinding action="HELPERPAYROLL_TOGGLE_MANAGEMENT_MENU">
+            <binding device="KB_MOUSE_DEFAULT" input="KEY_rctrl KEY_h" />
+        </actionBinding>
     </inputBinding>
 
     <extraSourceFiles>
+        <sourceFile filename="scripts/gui/HelperPayrollMenu.lua" />
         <sourceFile filename="scripts/HelperPayroll.lua" />
     </extraSourceFiles>
 </modDesc>

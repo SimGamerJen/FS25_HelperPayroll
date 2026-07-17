@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8" standalone="no" ?>
+<GUI name="HelperPayrollMenu" onOpen="onOpen" onClose="onClose" onCreate="onCreate" onEscPressed="onClickBack">
+    <Bitmap profile="fs25_fullScreenBackground" id="background" imageColor="0.01681 0.01764 0.016 0.98"/>
+    <Bitmap profile="baseReference" position="80px 78px" size="1760px 895px" imageColor="0.025 0.028 0.025 0.92"/>
+
+    <GuiElement profile="fs25_menuContainer">
+        <GuiElement profile="fs25_menuHeaderPanel">
+            <Bitmap profile="fs25_menuHeaderIconBg">
+                <Bitmap profile="fs25_menuHeaderIcon"/>
+            </Bitmap>
+            <Text profile="fs25_menuHeaderTitle" id="titleElement" text="HELPER PAYROLL"/>
+        </GuiElement>
+
+        <BoxLayout profile="fs25_subCategorySelectorTabbedBox" id="subCategoryBox">
+            <Button profile="fs25_subCategorySelectorTabbedTab" id="subCategoryTabs[1]" text="OVERVIEW" onClick="onClickOverview"><ThreePartBitmap profile="fs25_subCategorySelectorTabbedTabBg" name="background"/></Button>
+            <Button profile="fs25_subCategorySelectorTabbedTab" id="subCategoryTabs[2]" text="BILLING" onClick="onClickBilling"><ThreePartBitmap profile="fs25_subCategorySelectorTabbedTabBg" name="background"/></Button>
+            <Button profile="fs25_subCategorySelectorTabbedTab" id="subCategoryTabs[3]" text="ROLES" onClick="onClickRoles"><ThreePartBitmap profile="fs25_subCategorySelectorTabbedTabBg" name="background"/></Button>
+            <Button profile="fs25_subCategorySelectorTabbedTab" id="subCategoryTabs[4]" text="LEDGER" onClick="onClickLedger"><ThreePartBitmap profile="fs25_subCategorySelectorTabbedTabBg" name="background"/></Button>
+            <Button profile="fs25_subCategorySelectorTabbedTab" id="subCategoryTabs[5]" text="HELP" onClick="onClickHelp"><ThreePartBitmap profile="fs25_subCategorySelectorTabbedTabBg" name="background"/></Button>
+        </BoxLayout>
+        <ThreePartBitmap profile="fs25_lineSeparatorTopHighlighted" position="0px -57px"/>
+
+        <GuiElement profile="fs25_subCategorySelectorTabbedContainer" id="hpayMainPage">
+            <Bitmap position="-20px 150px" size="1525px 615px" imageColor="0.015 0.017 0.015 0.28"/>
+            <Text id="hintText" text="HelperPayroll management | Edit values directly in the table | APPLY writes current save payroll settings" position="0px 12px" size="1480px 25px" textSize="15px" textColor="0.55 0.63 0.50 1" textVerticalAlignment="middle" textAlignment="left"/>
+
+            <Text id="bodyTextElement" text="" position="40px 150px" size="1480px 585px" textSize="16px" textColor="0.88 0.90 0.86 1" textVerticalAlignment="top" textAlignment="left" textMaxNumLines="36"/>
+
+            <GuiElement id="tableContainer" visible="false" position="0px 240px" size="1520px 545px">
+                <GuiElement id="tableListArea" position="0px 0px" size="1520px 545px">
+                    <GuiElement profile="fs25_statisticsHeaderBox" position="0px -18px" size="1465px 38px">
+                        <Text profile="hpayColumnHeader" position="20px -3px" size="420px 34px" text="Item"/>
+                        <Text profile="hpayColumnHeader" position="470px -3px" size="285px 34px" text="Value"/>
+                        <Text profile="hpayColumnHeader" position="805px -3px" size="220px 34px" text="Status"/>
+                        <Text profile="hpayColumnHeader" position="1065px -3px" size="360px 34px" text="Source"/>
+                    </GuiElement>
+
+                    <SmoothList id="itemList" profile="hpayListWide" position="0px -70px" size="1465px 430px" listItemSpacing="-1px">
+                        <ListItem profile="hpayListItem">
+                            <ThreePartBitmap profile="hpayListItemGradient" name="alternating"/>
+                            <Text profile="hpayRowCellLeft" position="20px 0px" size="420px 34px" name="cellItem"/>
+                            <Button profile="hpayInlineAdjustButton" position="470px -3px" size="38px 30px" name="cellPrev" text="&lt;" onClick="onClickCellPrev"/>
+                            <Text profile="hpayRowCellValue" position="520px 0px" size="185px 34px" name="cellValue"/>
+                            <Button profile="hpayInlineAdjustButton" position="717px -3px" size="38px 30px" name="cellNext" text="&gt;" onClick="onClickCellNext"/>
+                            <Text profile="hpayRowCellCenter" position="805px 0px" size="220px 34px" name="cellStatus"/>
+                            <Text profile="hpayRowCellCenter" position="1065px 0px" size="360px 34px" name="cellSource"/>
+                        </ListItem>
+                    </SmoothList>
+
+                    <ThreePartBitmap profile="hpaySliderBoxTall" position="1475px -70px" size="6px 430px" id="itemListSliderBox"><Slider profile="fs25_listSlider" dataElementId="itemList"/></ThreePartBitmap>
+
+                    <Text profile="hpayDetailsInfo" id="rowHelpText" position="20px -520px" size="1020px 44px" text="Select an editable row, then use the left/right controls in the Value column. APPLY writes the current save payroll settings."/>
+                    <Text profile="hpayDetailsDirty" id="dirtyText" position="20px -575px" size="1020px 42px" text=""/>
+                    <Button profile="hpayActionButton" id="applyButton" position="1085px -522px" size="180px 36px" text="APPLY" onClick="onClickApply"/>
+                    <Button profile="hpayActionButton" id="discardButton" position="1285px -522px" size="180px 36px" text="DISCARD" onClick="onClickDiscard"/>
+                </GuiElement>
+            </GuiElement>
+        </GuiElement>
+
+        <BoxLayout profile="fs25_dialogButtonBox">
+            <Button profile="buttonMenuPrev" text="PREV TAB" onClick="onPagePrevious" id="prevTabButton"/>
+            <Button profile="buttonMenuNext" text="NEXT TAB" onClick="onPageNext" id="nextTabButton"/>
+            <Button profile="buttonExtra1" text="RELOAD SAVE" onClick="onClickReload" id="reloadButton"/>
+            <Button profile="buttonExtra1" text="RESET SAVE" onClick="onClickReset" id="resetButton"/>
+            <Button profile="buttonBack" text="$l10n_button_back" onClick="onClickBack" id="backButton"/>
+        </BoxLayout>
+    </GuiElement>
+</GUI>

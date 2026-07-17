@@ -6,10 +6,10 @@ Instead of letting the game charge its built-in AI helper rate continuously, Hel
 
 ## Alpha status
 
-Current build: **0.1.9.1 Alpha RC**  
+Current build: **0.2.3.6 Alpha Baseline**  
 FS25 modDesc: **110**
 
-This is a GitHub alpha release candidate. The standalone vanilla `roleType` workflow has been tested with native AI fieldwork jobs. Multiplayer and dedicated-server behaviour are intentionally not declared as supported in this alpha.
+This is the 0.2 alpha baseline build. The standalone vanilla `roleType` workflow remains the tested baseline. The current feature set includes external defaults, per-save settings, a CCO-style management screen, persistent payroll ledger, report overlay, and clearer global-vs-save diagnostics. Multiplayer and dedicated-server behaviour are intentionally not declared as supported in this alpha.
 
 ## Tested vanilla workflow
 
@@ -31,10 +31,13 @@ Payroll can be reviewed through the report overlay or console report commands
 - Advanced `helperSlot` mode for A-J helper-slot/named-helper mapping.
 - HelperProfiles-style role list overlay.
 - In-game payroll report overlay.
+- External player-editable policy config generated in `modSettings/FS25_HelperPayroll/defaultPayrollConfig.xml`.
 - Persistent per-savegame settings.
 - Persistent payroll ledger with lightweight `index.xml` and period files such as `Y001_M06.xml`.
 - Console commands for role control, overlay layout, report review, and report export.
 - Configurable hourly rates, minimum worker charge, call-out fee, and billing mode.
+- CCO-style management screen for applying gameplay settings to the current save.
+- Clear split between global/default policy (`hpayConfig`) and current-save effective settings (`hpaySave`).
 - Supports `onJobFinish` and `dailyPayroll` billing modes.
 - Generic default rates plus example UK Tenant Farm and US Ranch profiles.
 
@@ -44,6 +47,7 @@ Payroll can be reviewed through the report overlay or console report commands
 ;           Cycle payroll role / next report page when the report overlay is open
 RCTRL + ;   Open/close payroll role list
 RCTRL + P   Open/close payroll report overlay
+RCTRL + H   Open/close HelperPayroll management screen
 ```
 
 The active/highlighted role is the selected role. There is no Enter/confirm step. The selected role applies to new AI helper jobs started after the role is changed. Existing active jobs keep the role they were assigned when they started.
@@ -60,6 +64,60 @@ The report overlay is read-only and intentionally lightweight for alpha. It has 
 ```
 
 Use `RCTRL + P` to open/close it and `;` to cycle pages while it is open.
+
+## Player-editable policy config
+
+From v0.2.0.1, HelperPayroll creates an editable policy config outside the ZIP:
+
+```text
+modSettings/FS25_HelperPayroll/defaultPayrollConfig.xml
+```
+
+This file controls the global payroll policy, including roles, rates, billing mode, minimum charge, call-out fee, payroll hour, profiles, and helper-slot mappings. The bundled `config/defaultPayrollConfig.xml` remains as the template and fallback.
+
+Save-specific state remains separate:
+
+```text
+modSettings/FS25_HelperPayroll/<savegame>/helperPayrollSettings.xml
+```
+
+That file stores the selected role, active profile/mode for the save, and UI layout settings. Payroll history remains in the savegame ledger folder.
+
+Useful global/default policy commands:
+
+```text
+hpayConfig status
+hpayConfig path
+hpayConfig reload
+hpayConfig reset
+```
+
+Use `hpayConfig reload` after editing the global/default XML while the save is running. Use `hpayConfig reset` to regenerate the external policy file from bundled defaults. Current save settings are separate and can be inspected with:
+
+```text
+hpaySave status
+hpaySave path
+hpaySave reload
+hpaySave reset
+```
+
+## Management screen
+
+The CCO-style management screen opens with:
+
+```text
+RCTRL + H
+```
+
+It is used for current-save gameplay configuration. Changes made with APPLY are written to:
+
+```text
+modSettings/FS25_HelperPayroll/<savegame>/helperPayrollSettings.xml
+```
+
+The global `defaultPayrollConfig.xml` is not modified by normal APPLY actions. It remains the template/default policy for new saves and reset-from-defaults behaviour.
+
+The current management screen is intentionally focused on the standalone vanilla payroll workflow. HelperProfiles-specific mapping and deeper named-worker integration are planned for the next development phase.
 
 ## Console commands
 
@@ -97,6 +155,11 @@ hpayReport roles
 hpayReport daily
 hpayReport export <name>
 hpayReport exportSession <name>
+
+hpaySave status
+hpaySave path
+hpaySave reload
+hpaySave reset
 
 hpayDump status
 hpayDump roles
@@ -164,6 +227,17 @@ modSettings/FS25_HelperPayroll/<savegame>/ledger/
 `index.xml` stores fast summaries. Period files such as `Y001_M06.xml` store detailed job/payment rows. The mod loads the index and current period during normal startup; older periods are loaded on demand by report commands.
 
 ## Configuration
+
+### Save-specific management UI settings
+
+The management UI now writes gameplay changes to the active savegame settings file:
+
+```text
+modSettings/FS25_HelperPayroll/<savegame>/helperPayrollSettings.xml
+```
+
+The global `defaultPayrollConfig.xml` remains the editable template/default policy used for new saves and reset-from-defaults behaviour.
+
 
 Default configuration is stored in:
 

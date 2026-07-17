@@ -1,6 +1,6 @@
 # FS25_HelperPayroll Alpha Testing Notes
 
-Current build: **v0.1.9.1 Alpha RC**
+Current build: **v0.2.3.6 Alpha Baseline**
 
 ## 1. Basic load test
 
@@ -8,11 +8,12 @@ Expected log entries:
 
 ```text
 [HelperPayroll] Initializing
-[HelperPayroll] Loaded config. Active payroll profile: default
+[HelperPayroll] Generated external payroll policy config: ... (first run only)
+[HelperPayroll] Loaded config. source=external file=.../modSettings/FS25_HelperPayroll/defaultPayrollConfig.xml Active payroll profile: default
 [HelperPayroll] Worker billing settings: ... payrollMode=roleType ... selectedRole=...
 [HelperPayroll] Loaded savegame persistence: ...
 [HelperPayroll] AI worker price suppression installed. Hook count=3
-[HelperPayroll] Registered console commands: hpayOverlay, hpayRole, hpayDump, hpayReport
+[HelperPayroll] Registered console commands: hpayOverlay, hpayRole, hpayDump, hpayReport, hpayConfig, hpaySave
 ```
 
 First-run saves may also show:
@@ -23,7 +24,66 @@ First-run saves may also show:
 
 That is normal before the first payroll entry is recorded.
 
-## 2. Role list and role cycling
+
+## 2. External policy config test
+
+Expected first-run path:
+
+```text
+modSettings/FS25_HelperPayroll/defaultPayrollConfig.xml
+```
+
+Console checks:
+
+```text
+hpayConfig status
+hpayConfig path
+hpayConfig reload
+```
+
+Expected behaviour:
+
+```text
+- `hpayConfig status` reports source=external.
+- `hpayConfig path` prints the editable policy XML path.
+- Editing the external XML then running `hpayConfig reload` reloads roles/rates/settings without restarting the game.
+- `hpayConfig reset` regenerates the external policy file from bundled defaults.
+```
+
+## 2b. Global/default vs current-save config diagnostics
+
+Global/default policy commands:
+
+```text
+hpayConfig status
+hpayConfig path
+```
+
+Expected behaviour:
+
+```text
+- `hpayConfig status` reports `defaultPayrollConfig.xml`.
+- It explicitly states that current save settings are separate.
+- It points users to `hpaySave status`.
+```
+
+Current-save/effective commands:
+
+```text
+hpaySave status
+hpaySave path
+hpaySave reload
+```
+
+Expected behaviour:
+
+```text
+- `hpaySave status` reports `<savegame>/helperPayrollSettings.xml`.
+- It shows the effective values currently used by gameplay.
+- Save-specific values may intentionally differ from the global/default policy.
+```
+
+## 3. Role list and role cycling
 
 Controls:
 
@@ -42,7 +102,7 @@ Expected log entries:
 
 The active/highlighted role is the selected role. No Enter/confirm step is used.
 
-## 3. Vanilla roleType AI job test
+## 4. Vanilla roleType AI job test
 
 Use default mode:
 
@@ -59,7 +119,7 @@ Start a native AI fieldwork job after selecting a role. Expected pattern:
 
 The detected vanilla helper slot may vary, but it must not control the payroll role in `roleType` mode.
 
-## 4. Short job / minimum charge test
+## 5. Short job / minimum charge test
 
 Let a worker run briefly and then stop/finish the job.
 
@@ -75,7 +135,7 @@ Expected pattern:
 
 Important: there should be **only one** `Worker billing applied` line for the finished job.
 
-## 5. Longer job above minimum test
+## 6. Longer job above minimum test
 
 Run a job long enough that hourly labour exceeds the minimum charge.
 
@@ -139,6 +199,8 @@ hpayReport summary
 hpayReport jobs 10
 hpayReport roles
 hpayReport export helperPayrollTestReport
+hpaySave status
+hpaySave path
 hpayDump status
 hpayDump ledger
 ```
@@ -204,3 +266,30 @@ Please include:
 - Relevant `log.txt` section from job start through job finish
 - Contents of `helperPayrollSettings.xml` if the issue relates to settings
 - `hpayReport export <name>` output if the issue relates to payroll totals
+
+
+## v0.2.3.3 CCO-style table editing UI
+
+1. Open the management screen with RCTRL + H.
+2. Open the Billing tab.
+3. Confirm the right-hand details pane is gone.
+4. Confirm editable rows show left/right controls in the Value column.
+5. Change billing mode, payroll hour, minimum charge, callout fee, and round charges from the table.
+6. Press APPLY and confirm the current save payroll settings is written.
+7. Use DISCARD/RELOAD to confirm staged changes can be reverted.
+8. Confirm role list, report overlay, payroll billing, and persistent ledger still work.
+
+
+## v0.2.3.6 alpha baseline config/status test
+
+1. Open management UI with `RCTRL + H`.
+2. Change one Billing setting or one role hourly rate.
+3. Press APPLY.
+4. Confirm the log says `Saved savegame persistence` and references `modSettings/FS25_HelperPayroll/<savegame>/helperPayrollSettings.xml`.
+5. Confirm `defaultPayrollConfig.xml` is not changed by APPLY.
+6. Reload the save and confirm the changed setting is restored from the savegame settings file.
+7. Use RESET SAVE and confirm the current save is reset from the global/default policy template.
+
+8. Run `hpayConfig status` and confirm it reports only the global/default policy.
+9. Run `hpaySave status` and confirm it reports the current-save/effective values.
+10. Confirm both commands make the config source clear and do not mix the two layers.

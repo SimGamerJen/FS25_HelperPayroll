@@ -1,5 +1,5 @@
 -- Helper Payroll
--- Version: 0.1.9.1-alpha-rc
+-- Version: 0.2.3.6-alpha
 -- Purpose:
 --   1. Suppress vanilla AI worker payments.
 --   2. Track active AI jobs.
@@ -8,10 +8,16 @@
 
 print("[HelperPayroll] Lua file loaded")
 
+-- Forward declarations for helpers used by early callback methods.
+local hpIsInputPress
+local hpGetTimeMs
+
 HelperPayroll = {}
 HelperPayroll.MOD_NAME = g_currentModName or "FS25_HelperPayroll"
 HelperPayroll.MOD_DIRECTORY = g_currentModDirectory or ""
-HelperPayroll.CONFIG_FILE = HelperPayroll.MOD_DIRECTORY .. "config/defaultPayrollConfig.xml"
+HelperPayroll.BUNDLED_CONFIG_FILE = HelperPayroll.MOD_DIRECTORY .. "config/defaultPayrollConfig.xml"
+HelperPayroll.CONFIG_FILE = HelperPayroll.BUNDLED_CONFIG_FILE
+HelperPayroll.EXTERNAL_CONFIG_FILENAME = "defaultPayrollConfig.xml"
 
 HelperPayroll.settings = {
     debug = true,
@@ -74,6 +80,14 @@ HelperPayroll.persistence = {
     savegameDir = nil,
     filePath = nil,
     loaded = false
+}
+HelperPayroll.policyConfig = {
+    modSettingsDir = nil,
+    externalPath = nil,
+    bundledPath = nil,
+    activePath = nil,
+    source = "bundled",
+    generated = false
 }
 HelperPayroll.ledger = {
     ledgerDir = nil,
@@ -139,12 +153,398 @@ local function getXmlFloatOrDefault(xmlFile, key, default)
     return value
 end
 
-function HelperPayroll:loadConfig()
-    local xmlFile = loadXMLFile("helperPayrollConfig", self.CONFIG_FILE)
-    if xmlFile == nil or xmlFile == 0 then
-        rcWarn("Could not load config: %s", tostring(self.CONFIG_FILE))
+
+local HPAY_DEFAULT_POLICY_XML = [=[
+<?xml version="1.0" encoding="utf-8"?>
+<helperPayroll>
+    <settings>
+        <debug>true</debug>
+        <suppressVanillaAIWorkerCosts>true</suppressVanillaAIWorkerCosts>
+        <enableCustomWorkerCosts>true</enableCustomWorkerCosts>
+
+        <!-- Public/default profile. This mod uses the savegame's own money display settings. -->
+        <activePayrollProfile>default</activePayrollProfile>
+
+        <!--
+            roleType  = vanilla-friendly mode; all AI jobs use selectedRole for payroll.
+            helperSlot = advanced/roleplay mode; detected vanilla helper slot A-J resolves to helperSlots below.
+        -->
+        <payrollMode>roleType</payrollMode>
+        <selectedRole>standard</selectedRole>
+        <fallbackRole>standard</fallbackRole>
+
+        <!-- Optional fallback only. Leave blank unless you deliberately want every job assigned to one slot. -->
+        <defaultHelperSlot></defaultHelperSlot>
+
+        <chargeCustomWorkerCosts>true</chargeCustomWorkerCosts>
+        <billingMode>onJobFinish</billingMode>
+        <payrollHour>18</payrollHour>
+        <minimumWorkerCharge>5.00</minimumWorkerCharge>
+        <workerCalloutFee>0.00</workerCalloutFee>
+        <roundWorkerCharges>true</roundWorkerCharges>
+        <roleSelectorDebounceMs>450</roleSelectorDebounceMs>
+        <logLevel>normal</logLevel>
+        <debugAllMoneyTransactions>false</debugAllMoneyTransactions>
+        <helperProfilesDiagnostics>false</helperProfilesDiagnostics>
+        <helperProfilesDiagnosticLimit>12</helperProfilesDiagnosticLimit>
+    </settings>
+
+    <profiles>
+        <profile id="default" name="Default Helper Payroll" economyMultiplier="1.00" />
+        <profile id="uk_tenant" name="UK Tenant Farm Example" economyMultiplier="1.00" />
+        <profile id="us_ranch" name="US Ranch Example" economyMultiplier="1.00" />
+    </profiles>
+
+    <workerRates profile="default">
+        <worker id="owner" name="Owner Labour" hourlyRate="0" />
+        <worker id="trainee" name="Trainee Helper" hourlyRate="10" />
+        <worker id="standard" name="Standard Helper" hourlyRate="18" />
+        <worker id="skilled" name="Skilled Operator" hourlyRate="22" />
+        <worker id="contractor" name="Contractor" hourlyRate="30" />
+    </workerRates>
+
+    <workerRates profile="uk_tenant">
+        <worker id="owner" name="Owner Labour" hourlyRate="0" />
+        <worker id="trainee" name="Trainee Helper" hourlyRate="10" />
+        <worker id="standard" name="General Farmhand" hourlyRate="14" />
+        <worker id="skilled" name="Skilled Operator" hourlyRate="18" />
+        <worker id="manager" name="Farm Manager" hourlyRate="24" />
+        <worker id="contractor" name="External Contractor" hourlyRate="28" />
+    </workerRates>
+
+    <workerRates profile="us_ranch">
+        <worker id="owner" name="Owner Labour" hourlyRate="0" />
+        <worker id="trainee" name="Trainee Ranch Hand" hourlyRate="14" />
+        <worker id="standard" name="Ranch Hand" hourlyRate="18" />
+        <worker id="skilled" name="Skilled Operator" hourlyRate="24" />
+        <worker id="manager" name="Ranch Manager" hourlyRate="30" />
+        <worker id="contractor" name="External Contractor" hourlyRate="35" />
+    </workerRates>
+
+    <!-- Advanced mode only: used when payrollMode="helperSlot". -->
+    <helperSlots profile="default">
+        <helper slot="A" name="Helper A" role="Standard Helper" workerRate="standard" />
+        <helper slot="B" name="Helper B" role="Standard Helper" workerRate="standard" />
+        <helper slot="C" name="Helper C" role="Standard Helper" workerRate="standard" />
+        <helper slot="D" name="Helper D" role="Standard Helper" workerRate="standard" />
+        <helper slot="E" name="Helper E" role="Standard Helper" workerRate="standard" />
+        <helper slot="F" name="Helper F" role="Standard Helper" workerRate="standard" />
+        <helper slot="G" name="Helper G" role="Standard Helper" workerRate="standard" />
+        <helper slot="H" name="Helper H" role="Standard Helper" workerRate="standard" />
+        <helper slot="I" name="Helper I" role="Standard Helper" workerRate="standard" />
+        <helper slot="J" name="Helper J" role="Standard Helper" workerRate="standard" />
+    </helperSlots>
+
+    <!-- Example roleplay setup for use with HelperProfiles-style helper slot identities. -->
+    <helperSlots profile="uk_tenant">
+        <helper slot="A" name="Marty" role="Farm Manager" workerRate="manager" />
+        <helper slot="B" name="Rhys" role="Skilled Operator" workerRate="skilled" />
+        <helper slot="C" name="Ellie" role="General Farmhand" workerRate="standard" />
+        <helper slot="D" name="Graham" role="Contractor" workerRate="contractor" />
+    </helperSlots>
+
+    <helperSlots profile="us_ranch">
+        <helper slot="A" name="Riley" role="Skilled Operator" workerRate="skilled" />
+        <helper slot="B" name="Jed" role="Neighbour / Mates Rate" workerRate="standard" />
+        <helper slot="C" name="Miguel" role="Ranch Hand" workerRate="standard" />
+        <helper slot="D" name="External Contractor" role="Contractor" workerRate="contractor" />
+    </helperSlots>
+</helperPayroll>
+]=]
+
+local function hpayPolicyGetUserPath()
+    if getUserProfileAppPath ~= nil then
+        return getUserProfileAppPath()
+    end
+    return ""
+end
+
+local function hpayPolicyFileExists(path)
+    if path == nil or path == "" then
+        return false
+    end
+    if fileExists ~= nil then
+        return fileExists(path)
+    end
+    return false
+end
+
+local function hpayPolicyEnsureFolder(path)
+    if path == nil or path == "" then
         return
     end
+    if hpayPolicyFileExists(path) then
+        return
+    end
+    if createFolder ~= nil then
+        createFolder(path)
+    end
+end
+
+local function hpayPolicyWriteFile(path, content)
+    if path == nil or path == "" then
+        return false
+    end
+    local f = io.open(path, "w")
+    if f == nil then
+        return false
+    end
+    f:write(tostring(content or ""))
+    f:write("\n")
+    f:close()
+    return true
+end
+
+function HelperPayroll:initPolicyConfigPaths()
+    self.policyConfig = self.policyConfig or {}
+    local base = hpayPolicyGetUserPath() .. "modSettings/"
+    local modDir = base .. "FS25_HelperPayroll/"
+
+    hpayPolicyEnsureFolder(base)
+    hpayPolicyEnsureFolder(modDir)
+
+    self.policyConfig.modSettingsDir = modDir
+    self.policyConfig.bundledPath = self.BUNDLED_CONFIG_FILE or (self.MOD_DIRECTORY .. "config/defaultPayrollConfig.xml")
+    self.policyConfig.externalPath = modDir .. tostring(self.EXTERNAL_CONFIG_FILENAME or "defaultPayrollConfig.xml")
+end
+
+function HelperPayroll:ensureExternalPolicyConfig(reason)
+    self:initPolicyConfigPaths()
+    local path = self.policyConfig ~= nil and self.policyConfig.externalPath or nil
+    if path == nil or path == "" then
+        rcWarn("External policy config path could not be resolved")
+        return false
+    end
+
+    if hpayPolicyFileExists(path) then
+        return true
+    end
+
+    local ok = hpayPolicyWriteFile(path, HPAY_DEFAULT_POLICY_XML)
+    if ok then
+        self.policyConfig.generated = true
+        rcLog("Generated external payroll policy config: reason=%s file=%s", tostring(reason or "first-run"), tostring(path))
+        return true
+    end
+
+    rcWarn("Could not generate external payroll policy config: %s", tostring(path))
+    return false
+end
+
+function HelperPayroll:resolvePolicyConfigFile()
+    self:ensureExternalPolicyConfig("resolve")
+    local externalPath = self.policyConfig ~= nil and self.policyConfig.externalPath or nil
+    if externalPath ~= nil and externalPath ~= "" and hpayPolicyFileExists(externalPath) then
+        self.CONFIG_FILE = externalPath
+        self.policyConfig.activePath = externalPath
+        self.policyConfig.source = "external"
+        return externalPath, "external"
+    end
+
+    local bundled = self.BUNDLED_CONFIG_FILE or self.CONFIG_FILE
+    self.CONFIG_FILE = bundled
+    if self.policyConfig ~= nil then
+        self.policyConfig.activePath = bundled
+        self.policyConfig.source = "bundled"
+    end
+    return bundled, "bundled"
+end
+
+function HelperPayroll:resetExternalPolicyConfig(reason)
+    self:initPolicyConfigPaths()
+    local path = self.policyConfig ~= nil and self.policyConfig.externalPath or nil
+    if path == nil or path == "" then
+        rcWarn("Policy config reset failed: no external path resolved")
+        return false
+    end
+    local ok = hpayPolicyWriteFile(path, HPAY_DEFAULT_POLICY_XML)
+    if ok then
+        self.policyConfig.generated = true
+        rcLog("External policy config reset: %s", tostring(path))
+        rcLog("External payroll policy config reset: reason=%s file=%s", tostring(reason or "manual"), tostring(path))
+        return true
+    end
+    rcWarn("Policy config reset failed: %s", tostring(path))
+    return false
+end
+
+
+local function hpayXmlEscape(value)
+    local text = tostring(value or "")
+    text = text:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"):gsub('"', "&quot;")
+    return text
+end
+
+function HelperPayroll:buildPolicyConfigXmlFromRuntime()
+    local lines = {}
+    local function add(line) table.insert(lines, line) end
+    local settings = self.settings or {}
+    add('<?xml version="1.0" encoding="utf-8"?>')
+    add('<helperPayroll>')
+    add('    <settings>')
+    add(string.format('        <debug>%s</debug>', tostring(settings.debug == true)))
+    add(string.format('        <suppressVanillaAIWorkerCosts>%s</suppressVanillaAIWorkerCosts>', tostring(settings.suppressVanillaAIWorkerCosts == true)))
+    add(string.format('        <enableCustomWorkerCosts>%s</enableCustomWorkerCosts>', tostring(settings.enableCustomWorkerCosts == true)))
+    add(string.format('        <activePayrollProfile>%s</activePayrollProfile>', hpayXmlEscape(settings.activePayrollProfile or 'default')))
+    add(string.format('        <payrollMode>%s</payrollMode>', hpayXmlEscape(settings.payrollMode or 'roleType')))
+    add(string.format('        <selectedRole>%s</selectedRole>', hpayXmlEscape(settings.selectedRole or 'standard')))
+    add(string.format('        <fallbackRole>%s</fallbackRole>', hpayXmlEscape(settings.fallbackRole or 'standard')))
+    add(string.format('        <defaultHelperSlot>%s</defaultHelperSlot>', hpayXmlEscape(settings.defaultHelperSlot or '')))
+    add(string.format('        <chargeCustomWorkerCosts>%s</chargeCustomWorkerCosts>', tostring(settings.chargeCustomWorkerCosts == true)))
+    add(string.format('        <billingMode>%s</billingMode>', hpayXmlEscape(settings.billingMode or 'onJobFinish')))
+    add(string.format('        <payrollHour>%s</payrollHour>', tostring(math.floor(tonumber(settings.payrollHour) or 18))))
+    add(string.format('        <minimumWorkerCharge>%.2f</minimumWorkerCharge>', tonumber(settings.minimumWorkerCharge) or 0))
+    add(string.format('        <workerCalloutFee>%.2f</workerCalloutFee>', tonumber(settings.workerCalloutFee) or 0))
+    add(string.format('        <roundWorkerCharges>%s</roundWorkerCharges>', tostring(settings.roundWorkerCharges == true)))
+    add(string.format('        <roleSelectorDebounceMs>%s</roleSelectorDebounceMs>', tostring(math.floor(tonumber(settings.roleSelectorDebounceMs) or 450))))
+    add(string.format('        <logLevel>%s</logLevel>', hpayXmlEscape(settings.logLevel or 'normal')))
+    add(string.format('        <debugAllMoneyTransactions>%s</debugAllMoneyTransactions>', tostring(settings.debugAllMoneyTransactions == true)))
+    add(string.format('        <helperProfilesDiagnostics>%s</helperProfilesDiagnostics>', tostring(settings.helperProfilesDiagnostics == true)))
+    add(string.format('        <helperProfilesDiagnosticLimit>%s</helperProfilesDiagnosticLimit>', tostring(math.floor(tonumber(settings.helperProfilesDiagnosticLimit) or 12))))
+    add('    </settings>')
+    add('')
+    add('    <profiles>')
+    local profileIds = {}
+    for id,_ in pairs(self.profiles or {}) do table.insert(profileIds, id) end
+    table.sort(profileIds)
+    for _, id in ipairs(profileIds) do
+        local p = self.profiles[id]
+        add(string.format('        <profile id="%s" name="%s" economyMultiplier="%.2f" />', hpayXmlEscape(id), hpayXmlEscape(p.name or id), tonumber(p.economyMultiplier) or 1))
+    end
+    add('    </profiles>')
+    add('')
+    for _, profileId in ipairs(profileIds) do
+        local rates = self.workerRates ~= nil and self.workerRates[profileId] or nil
+        if rates ~= nil then
+            add(string.format('    <workerRates profile="%s">', hpayXmlEscape(profileId)))
+            local order = self.workerRateOrder ~= nil and self.workerRateOrder[profileId] or {}
+            for _, roleId in ipairs(order) do
+                local w = rates[roleId]
+                if w ~= nil then
+                    add(string.format('        <worker id="%s" name="%s" hourlyRate="%s" />', hpayXmlEscape(roleId), hpayXmlEscape(w.name or roleId), hpayXmlEscape(tostring(tonumber(w.hourlyRate) or 0))))
+                end
+            end
+            add('    </workerRates>')
+            add('')
+        end
+    end
+    for _, profileId in ipairs(profileIds) do
+        local slots = self.helperSlots ~= nil and self.helperSlots[profileId] or nil
+        if slots ~= nil then
+            add(string.format('    <helperSlots profile="%s">', hpayXmlEscape(profileId)))
+            for _, slot in ipairs({'A','B','C','D','E','F','G','H','I','J'}) do
+                local h = slots[slot]
+                if h ~= nil then
+                    add(string.format('        <helper slot="%s" name="%s" role="%s" workerRate="%s" />', hpayXmlEscape(slot), hpayXmlEscape(h.name or ('Helper '..slot)), hpayXmlEscape(h.role or ''), hpayXmlEscape(h.workerRate or 'standard')))
+                end
+            end
+            add('    </helperSlots>')
+            add('')
+        end
+    end
+    add('</helperPayroll>')
+    return table.concat(lines, '\n')
+end
+
+function HelperPayroll:saveExternalPolicyConfigFromRuntime(reason)
+    self:initPolicyConfigPaths()
+    local path = self.policyConfig ~= nil and self.policyConfig.externalPath or nil
+    if path == nil or path == '' then
+        rcWarn('Policy config save failed: no external path resolved')
+        return false
+    end
+    local ok = hpayPolicyWriteFile(path, self:buildPolicyConfigXmlFromRuntime())
+    if ok then
+        self.CONFIG_FILE = path
+        self.policyConfig.activePath = path
+        self.policyConfig.source = 'external'
+        rcLog('External policy config saved: reason=%s file=%s', tostring(reason or 'runtime'), tostring(path))
+        return true
+    end
+    rcWarn('Policy config save failed: %s', tostring(path))
+    return false
+end
+
+function HelperPayroll:applyManagementDraft(draftSettings, draftRates, reason)
+    draftSettings = draftSettings or {}
+    draftRates = draftRates or {}
+    self.settings.billingMode = tostring(draftSettings.billingMode or self.settings.billingMode or 'onJobFinish')
+    self.settings.payrollHour = math.floor(tonumber(draftSettings.payrollHour or self.settings.payrollHour) or 18)
+    self.settings.minimumWorkerCharge = tonumber(draftSettings.minimumWorkerCharge or self.settings.minimumWorkerCharge) or 0
+    self.settings.workerCalloutFee = tonumber(draftSettings.workerCalloutFee or self.settings.workerCalloutFee) or 0
+    self.settings.roundWorkerCharges = draftSettings.roundWorkerCharges == true or tostring(draftSettings.roundWorkerCharges) == 'true'
+    self.settings.payrollMode = tostring(draftSettings.payrollMode or self.settings.payrollMode or 'roleType')
+    self.settings.selectedRole = tostring(draftSettings.selectedRole or self.settings.selectedRole or 'standard')
+    self.settings.fallbackRole = tostring(draftSettings.fallbackRole or self.settings.fallbackRole or 'standard')
+    self.settings.activePayrollProfile = tostring(draftSettings.activePayrollProfile or self.settings.activePayrollProfile or 'default')
+    local profileId = self.settings.activePayrollProfile
+    if self.workerRates ~= nil and self.workerRates[profileId] ~= nil then
+        for roleId, rate in pairs(draftRates) do
+            if self.workerRates[profileId][roleId] ~= nil then
+                self.workerRates[profileId][roleId].hourlyRate = tonumber(rate) or 0
+            end
+        end
+    end
+    local ok = self:saveSavegameSettings(reason or 'management-ui')
+    if ok then
+        self:showRoleMessage('Helper Payroll: save settings applied')
+        rcLog('Management draft applied to savegame settings: reason=%s file=%s', tostring(reason or 'management-ui'), tostring(self.persistence ~= nil and self.persistence.filePath or 'unknown'))
+    end
+    return ok
+end
+
+function HelperPayroll:showManagementMenu()
+    if HelperPayrollMenu ~= nil and HelperPayrollMenu.show ~= nil then
+        self.roleListVisible = false
+        self.reportOverlayVisible = false
+        return HelperPayrollMenu.show(self.MOD_DIRECTORY, 'overview')
+    end
+    rcWarn('Management GUI is not available')
+    return false
+end
+
+function HelperPayroll:onInputToggleManagementMenu(actionName, inputValue, callbackState, isAnalog)
+    if not hpIsInputPress(inputValue, callbackState) then return end
+    local now = hpGetTimeMs()
+    local debounceMs = tonumber(self.settings.roleSelectorDebounceMs) or 450
+    self._lastManagementMenuToggleAt = self._lastManagementMenuToggleAt or 0
+    if now - self._lastManagementMenuToggleAt < debounceMs then return end
+    self._lastManagementMenuToggleAt = now
+    self:showManagementMenu()
+end
+
+function HelperPayroll:loadConfig()
+    -- v0.2.x: prefer the player-editable policy file in modSettings.
+    -- The bundled config remains a safe fallback and template source.
+    local configPath, configSource = self:resolvePolicyConfigFile()
+    local xmlFile = loadXMLFile("helperPayrollConfig", configPath)
+    if xmlFile == nil or xmlFile == 0 then
+        rcWarn("Could not load %s policy config: %s", tostring(configSource), tostring(configPath))
+        local bundled = self.BUNDLED_CONFIG_FILE or self.CONFIG_FILE
+        if bundled ~= nil and bundled ~= configPath then
+            xmlFile = loadXMLFile("helperPayrollBundledConfigFallback", bundled)
+            if xmlFile ~= nil and xmlFile ~= 0 then
+                self.CONFIG_FILE = bundled
+                self.policyConfig = self.policyConfig or {}
+                self.policyConfig.activePath = bundled
+                self.policyConfig.source = "bundled-fallback"
+                configPath = bundled
+                configSource = "bundled-fallback"
+                rcWarn("Using bundled payroll policy fallback: %s", tostring(bundled))
+            end
+        end
+        if xmlFile == nil or xmlFile == 0 then
+            rcWarn("Could not load any payroll policy config")
+            return
+        end
+    end
+
+    -- Reset policy-derived tables so console reloads do not duplicate entries.
+    self.profiles = {}
+    self.workerRates = {}
+    self.workerRateOrder = {}
+    self.helperSlots = {}
+    self.helperSlotCounts = {}
 
     self.settings.debug = getXmlBoolOrDefault(xmlFile, "helperPayroll.settings.debug", self.settings.debug)
     self.settings.suppressVanillaAIWorkerCosts = getXmlBoolOrDefault(xmlFile, "helperPayroll.settings.suppressVanillaAIWorkerCosts", self.settings.suppressVanillaAIWorkerCosts)
@@ -164,6 +564,7 @@ function HelperPayroll:loadConfig()
     self.settings.minimumWorkerCharge = getXmlFloatOrDefault(xmlFile, "helperPayroll.settings.minimumWorkerCharge", self.settings.minimumWorkerCharge)
     self.settings.workerCalloutFee = getXmlFloatOrDefault(xmlFile, "helperPayroll.settings.workerCalloutFee", self.settings.workerCalloutFee)
     self.settings.roundWorkerCharges = getXmlBoolOrDefault(xmlFile, "helperPayroll.settings.roundWorkerCharges", self.settings.roundWorkerCharges)
+    self.settings.roleSelectorDebounceMs = getXmlFloatOrDefault(xmlFile, "helperPayroll.settings.roleSelectorDebounceMs", self.settings.roleSelectorDebounceMs or 450)
     self.settings.logLevel = getXmlStringOrDefault(xmlFile, "helperPayroll.settings.logLevel", self.settings.logLevel)
     self.settings.debugAllMoneyTransactions = getXmlBoolOrDefault(xmlFile, "helperPayroll.settings.debugAllMoneyTransactions", self.settings.debugAllMoneyTransactions)
     self.settings.helperProfilesDiagnostics = getXmlBoolOrDefault(xmlFile, "helperPayroll.settings.helperProfilesDiagnostics", self.settings.helperProfilesDiagnostics)
@@ -174,7 +575,7 @@ function HelperPayroll:loadConfig()
     self:loadHelperSlots(xmlFile)
 
     delete(xmlFile)
-    rcLog("Loaded config. Active payroll profile: %s", tostring(self.settings.activePayrollProfile))
+    rcLog("Loaded config. source=%s file=%s Active payroll profile: %s", tostring(self.policyConfig ~= nil and self.policyConfig.source or "unknown"), tostring(self.CONFIG_FILE), tostring(self.settings.activePayrollProfile))
     rcLog("Worker billing settings: enabled=%s payrollMode=%s billingMode=%s payrollHour=%s selectedRole=%s fallbackRole=%s defaultHelperSlot=%s minimum=%.2f callout=%.2f round=%s logLevel=%s helperProfilesDiagnostics=%s", tostring(self.settings.chargeCustomWorkerCosts), tostring(self.settings.payrollMode), tostring(self.settings.billingMode), tostring(self.settings.payrollHour), tostring(self.settings.selectedRole), tostring(self.settings.fallbackRole), tostring(self.settings.defaultHelperSlot ~= "" and self.settings.defaultHelperSlot or "none"), tonumber(self.settings.minimumWorkerCharge) or 0, tonumber(self.settings.workerCalloutFee) or 0, tostring(self.settings.roundWorkerCharges), tostring(self.settings.logLevel), tostring(self.settings.helperProfilesDiagnostics))
     self:logHelperSlotConfig()
 end
@@ -343,7 +744,7 @@ function HelperPayroll:getWorkerRateOrder(profileId)
 end
 
 
-local function hpIsInputPress(inputValue, callbackState)
+hpIsInputPress = function(inputValue, callbackState)
     if type(inputValue) == "number" then
         return inputValue > 0
     elseif type(inputValue) == "boolean" then
@@ -354,7 +755,7 @@ local function hpIsInputPress(inputValue, callbackState)
     return v ~= nil and v > 0
 end
 
-local function hpGetTimeMs()
+hpGetTimeMs = function()
     if type(g_time) == "number" then
         return g_time
     end
@@ -1064,6 +1465,7 @@ function HelperPayroll:registerGlobalPlayerInputActions()
     registerOne("_playerCycleRoleActionEventId", InputAction.HELPERPAYROLL_CYCLE_ROLE, self.onInputCycleRole, "HELPERPAYROLL_CYCLE_ROLE")
     registerOne("_playerToggleRoleListActionEventId", InputAction.HELPERPAYROLL_TOGGLE_ROLE_LIST, self.onInputToggleRoleList, "HELPERPAYROLL_TOGGLE_ROLE_LIST")
     registerOne("_playerToggleReportOverlayActionEventId", InputAction.HELPERPAYROLL_TOGGLE_REPORT_OVERLAY, self.onInputToggleReportOverlay, "HELPERPAYROLL_TOGGLE_REPORT_OVERLAY")
+    registerOne("_playerToggleManagementMenuActionEventId", InputAction.HELPERPAYROLL_TOGGLE_MANAGEMENT_MENU, self.onInputToggleManagementMenu, "HELPERPAYROLL_TOGGLE_MANAGEMENT_MENU")
 
     self.playerInputActionsRegistered = true
 end
@@ -1127,6 +1529,7 @@ function HelperPayroll:registerVehicleInputActions(vehicle, isActiveForInput)
     addOne(InputAction.HELPERPAYROLL_CYCLE_ROLE, self.onInputCycleRole, "HELPERPAYROLL_CYCLE_ROLE")
     addOne(InputAction.HELPERPAYROLL_TOGGLE_ROLE_LIST, self.onInputToggleRoleList, "HELPERPAYROLL_TOGGLE_ROLE_LIST")
     addOne(InputAction.HELPERPAYROLL_TOGGLE_REPORT_OVERLAY, self.onInputToggleReportOverlay, "HELPERPAYROLL_TOGGLE_REPORT_OVERLAY")
+    addOne(InputAction.HELPERPAYROLL_TOGGLE_MANAGEMENT_MENU, self.onInputToggleManagementMenu, "HELPERPAYROLL_TOGGLE_MANAGEMENT_MENU")
 end
 
 function HelperPayroll:removeVehicleInputActions(vehicle)
@@ -2113,7 +2516,7 @@ local function hpayNormalizeArgs(...)
         local v = args[i]
         if v ~= nil and tostring(v) ~= "" then
             local sv = tostring(v)
-            if sv == "hpayOverlay" or sv == "hpayRole" or sv == "hpayDump" or sv == "hpayReport" then
+            if sv == "hpayOverlay" or sv == "hpayRole" or sv == "hpayDump" or sv == "hpayReport" or sv == "hpayConfig" or sv == "hpaySave" then
                 -- Some console APIs echo the command name as argv[1]. Ignore it.
             elseif sub == nil then
                 sub = sv
@@ -2235,6 +2638,28 @@ function HelperPayroll:loadSavegameSettings()
     self.settings.payrollMode = getXmlStringOrDefault(xmlFile, "helperPayrollSave#payrollMode", self.settings.payrollMode)
     self.settings.selectedRole = getXmlStringOrDefault(xmlFile, "helperPayrollSave#selectedRole", self.settings.selectedRole)
     self.settings.fallbackRole = getXmlStringOrDefault(xmlFile, "helperPayrollSave#fallbackRole", self.settings.fallbackRole)
+
+    -- Save-specific gameplay policy overrides.  The global defaultPayrollConfig.xml remains
+    -- the template/default policy; the management UI writes active gameplay changes here.
+    self.settings.billingMode = getXmlStringOrDefault(xmlFile, "helperPayrollSave.policy#billingMode", self.settings.billingMode)
+    self.settings.payrollHour = getXmlFloatOrDefault(xmlFile, "helperPayrollSave.policy#payrollHour", self.settings.payrollHour or 18)
+    self.settings.minimumWorkerCharge = getXmlFloatOrDefault(xmlFile, "helperPayrollSave.policy#minimumWorkerCharge", self.settings.minimumWorkerCharge or 0)
+    self.settings.workerCalloutFee = getXmlFloatOrDefault(xmlFile, "helperPayrollSave.policy#workerCalloutFee", self.settings.workerCalloutFee or 0)
+    self.settings.roundWorkerCharges = getXmlBoolOrDefault(xmlFile, "helperPayrollSave.policy#roundWorkerCharges", self.settings.roundWorkerCharges ~= false)
+
+    local rateIndex = 0
+    while true do
+        local key = string.format("helperPayrollSave.workerRates.worker(%d)", rateIndex)
+        if not hasXMLProperty(xmlFile, key) then break end
+        local profileId = getXmlStringOrDefault(xmlFile, key .. "#profile", self.settings.activePayrollProfile or "default")
+        local roleId = getXmlStringOrDefault(xmlFile, key .. "#role", "")
+        local hourlyRate = getXmlFloatOrDefault(xmlFile, key .. "#hourlyRate", nil)
+        if roleId ~= nil and roleId ~= "" and hourlyRate ~= nil and self.workerRates ~= nil and self.workerRates[profileId] ~= nil and self.workerRates[profileId][roleId] ~= nil then
+            self.workerRates[profileId][roleId].hourlyRate = tonumber(hourlyRate) or self.workerRates[profileId][roleId].hourlyRate
+        end
+        rateIndex = rateIndex + 1
+    end
+
     self.settings.roleSelectorDebounceMs = getXmlFloatOrDefault(xmlFile, "helperPayrollSave.ui#debounceMs", self.settings.roleSelectorDebounceMs or 450)
 
     self.roleListUi = self.roleListUi or {}
@@ -2274,12 +2699,35 @@ function HelperPayroll:saveSavegameSettings(reason)
     end
 
     local ui = self.roleListUi or {}
-    setXMLString(xmlFile, "helperPayrollSave#version", "0.1.9.1")
+    setXMLString(xmlFile, "helperPayrollSave#version", "0.2.3.6")
     setXMLString(xmlFile, "helperPayrollSave#savegame", tostring(self.persistence.savegameName or "unknownSavegame"))
     setXMLString(xmlFile, "helperPayrollSave#activePayrollProfile", tostring(self.settings.activePayrollProfile or "default"))
     setXMLString(xmlFile, "helperPayrollSave#payrollMode", tostring(self.settings.payrollMode or "roleType"))
     setXMLString(xmlFile, "helperPayrollSave#selectedRole", tostring(self.settings.selectedRole or "standard"))
     setXMLString(xmlFile, "helperPayrollSave#fallbackRole", tostring(self.settings.fallbackRole or "standard"))
+
+    -- Save-specific gameplay policy overrides written by the management UI.
+    setXMLString(xmlFile, "helperPayrollSave.policy#billingMode", tostring(self.settings.billingMode or "onJobFinish"))
+    setXMLInt(xmlFile, "helperPayrollSave.policy#payrollHour", math.floor(tonumber(self.settings.payrollHour) or 18))
+    setXMLFloat(xmlFile, "helperPayrollSave.policy#minimumWorkerCharge", tonumber(self.settings.minimumWorkerCharge) or 0)
+    setXMLFloat(xmlFile, "helperPayrollSave.policy#workerCalloutFee", tonumber(self.settings.workerCalloutFee) or 0)
+    setXMLBool(xmlFile, "helperPayrollSave.policy#roundWorkerCharges", self.settings.roundWorkerCharges ~= false)
+
+    local activeProfile = tostring(self.settings.activePayrollProfile or "default")
+    local rates = self.workerRates ~= nil and self.workerRates[activeProfile] or nil
+    if rates ~= nil then
+        local ids = {}
+        for roleId, _ in pairs(rates) do table.insert(ids, roleId) end
+        table.sort(ids)
+        for i, roleId in ipairs(ids) do
+            local worker = rates[roleId]
+            local key = string.format("helperPayrollSave.workerRates.worker(%d)", i - 1)
+            setXMLString(xmlFile, key .. "#profile", activeProfile)
+            setXMLString(xmlFile, key .. "#role", tostring(roleId))
+            setXMLString(xmlFile, key .. "#name", tostring(worker.name or roleId))
+            setXMLFloat(xmlFile, key .. "#hourlyRate", tonumber(worker.hourlyRate) or 0)
+        end
+    end
 
     setXMLString(xmlFile, "helperPayrollSave.ui#anchor", tostring(ui.anchor or "TR"))
     setXMLFloat(xmlFile, "helperPayrollSave.ui#x", tonumber(ui.x) or 0.985)
@@ -2552,7 +3000,7 @@ function HelperPayroll:saveLedgerIndex(reason)
     local s = idx.summary or {}
     local lines = {}
     table.insert(lines, '<?xml version="1.0" encoding="utf-8" standalone="no" ?>')
-    table.insert(lines, '<helperPayrollLedgerIndex' .. hpayXmlAttr("version", "0.1.9.1") .. hpayXmlAttr("savegame", self.persistence ~= nil and self.persistence.savegameName or "unknown") .. '>')
+    table.insert(lines, '<helperPayrollLedgerIndex' .. hpayXmlAttr("version", "0.2.3.6") .. hpayXmlAttr("savegame", self.persistence ~= nil and self.persistence.savegameName or "unknown") .. '>')
     table.insert(lines, '  <summary' .. hpayXmlAttr("jobs", s.jobs or 0) .. hpayXmlAttr("hours", string.format("%.3f", tonumber(s.hours) or 0)) .. hpayXmlAttr("labour", string.format("%.2f", tonumber(s.labour) or 0)) .. hpayXmlAttr("calculated", string.format("%.2f", tonumber(s.calculated) or 0)) .. hpayXmlAttr("charged", string.format("%.2f", tonumber(s.charged) or 0)) .. hpayXmlAttr("minimumJobs", s.minimumJobs or 0) .. hpayXmlAttr("payments", s.payments or 0) .. ' />')
     table.insert(lines, '  <periods>')
     for _, id in ipairs(idx.periodOrder or {}) do
@@ -2653,7 +3101,7 @@ function HelperPayroll:savePeriodLedger(periodId)
     if path == nil then return false end
     local lines = {}
     table.insert(lines, '<?xml version="1.0" encoding="utf-8" standalone="no" ?>')
-    table.insert(lines, '<helperPayrollLedger' .. hpayXmlAttr("version", "0.1.9.1") .. hpayXmlAttr("period", periodId) .. hpayXmlAttr("savegame", self.persistence ~= nil and self.persistence.savegameName or "unknown") .. '>')
+    table.insert(lines, '<helperPayrollLedger' .. hpayXmlAttr("version", "0.2.3.6") .. hpayXmlAttr("period", periodId) .. hpayXmlAttr("savegame", self.persistence ~= nil and self.persistence.savegameName or "unknown") .. '>')
     for i, e in ipairs(entries or {}) do
         local attrs = ''
         local names = {"id","entryType","status","gameDate","realDate","billingMode","payrollMode","profile","role","helper","helperSlot","helperSlotUsedForPayroll","workerRate","rate","elapsedHours","labour","callout","minimum","minimumApplied","calculated","charged","farmId","jobType","sequence"}
@@ -2782,7 +3230,7 @@ function HelperPayroll:buildLedgerSummaryLines()
     local s = idx.summary or {}
     local lines = {}
     table.insert(lines, "HelperPayroll Persistent Ledger Summary")
-    table.insert(lines, "Version: 0.1.9.1")
+    table.insert(lines, "Version: 0.2.3.6")
     table.insert(lines, string.format("Savegame: %s", tostring(self.persistence ~= nil and self.persistence.savegameName or "unknown")))
     table.insert(lines, string.format("Ledger index: %s", tostring(self.ledger ~= nil and self.ledger.indexPath or "unknown")))
     table.insert(lines, string.format("Totals: jobs=%d payments=%d hours=%.3f labour=%s calculated=%s charged=%s minimumJobs=%d",
@@ -2875,7 +3323,7 @@ function HelperPayroll:buildSessionReportLines()
     local roleId, roleName, rate, profileId = self:getSelectedRoleInfo()
 
     table.insert(lines, "HelperPayroll Report")
-    table.insert(lines, string.format("Version: 0.1.9.1"))
+    table.insert(lines, string.format("Version: 0.2.3.6"))
     table.insert(lines, string.format("Savegame: %s", tostring(self.persistence ~= nil and self.persistence.savegameName or "unknown")))
     table.insert(lines, string.format("Game date: %s", tostring(dateKey)))
     table.insert(lines, string.format("Payroll mode: %s", tostring(self.settings.payrollMode)))
@@ -3299,6 +3747,144 @@ function HelperPayroll:hpayRole(...)
     hpayPrintf("Unknown hpayRole subcommand '%s' (try: hpayRole help)", tostring(a))
 end
 
+
+function HelperPayroll:getPolicyTemplateStatusValues()
+    self:initPolicyConfigPaths()
+    local path = self.policyConfig ~= nil and self.policyConfig.activePath or self.CONFIG_FILE
+    local source = self.policyConfig ~= nil and self.policyConfig.source or "unknown"
+    if path == nil or path == "" then
+        return nil
+    end
+
+    local xmlFile = loadXMLFile("helperPayrollPolicyStatusRead", path)
+    if xmlFile == nil or xmlFile == 0 then
+        return nil
+    end
+
+    local values = {
+        source = source,
+        path = path,
+        payrollMode = getXmlStringOrDefault(xmlFile, "helperPayroll.settings.payrollMode", "roleType"),
+        billingMode = getXmlStringOrDefault(xmlFile, "helperPayroll.settings.billingMode", "onJobFinish"),
+        activePayrollProfile = getXmlStringOrDefault(xmlFile, "helperPayroll.settings.activePayrollProfile", "default"),
+        selectedRole = getXmlStringOrDefault(xmlFile, "helperPayroll.settings.selectedRole", "standard"),
+        fallbackRole = getXmlStringOrDefault(xmlFile, "helperPayroll.settings.fallbackRole", "standard"),
+        minimumWorkerCharge = getXmlFloatOrDefault(xmlFile, "helperPayroll.settings.minimumWorkerCharge", 0),
+        workerCalloutFee = getXmlFloatOrDefault(xmlFile, "helperPayroll.settings.workerCalloutFee", 0),
+        payrollHour = getXmlFloatOrDefault(xmlFile, "helperPayroll.settings.payrollHour", 18),
+        roundWorkerCharges = getXmlBoolOrDefault(xmlFile, "helperPayroll.settings.roundWorkerCharges", true),
+    }
+    delete(xmlFile)
+    return values
+end
+
+function HelperPayroll:printPolicyTemplateStatus()
+    self:initPolicyConfigPaths()
+    hpayPrintf("Global/default policy config: source=%s active=%s external=%s bundled=%s generatedThisSession=%s",
+        tostring(self.policyConfig ~= nil and self.policyConfig.source or "unknown"),
+        tostring(self.policyConfig ~= nil and self.policyConfig.activePath or self.CONFIG_FILE),
+        tostring(self.policyConfig ~= nil and self.policyConfig.externalPath or "nil"),
+        tostring(self.policyConfig ~= nil and self.policyConfig.bundledPath or self.BUNDLED_CONFIG_FILE),
+        tostring(self.policyConfig ~= nil and self.policyConfig.generated == true))
+
+    local values = self:getPolicyTemplateStatusValues()
+    if values ~= nil then
+        hpayPrintf("Global/default policy values: payrollMode=%s billingMode=%s profile=%s selectedRole=%s fallbackRole=%s minimum=%.2f callout=%.2f payrollHour=%s round=%s",
+            tostring(values.payrollMode), tostring(values.billingMode), tostring(values.activePayrollProfile), tostring(values.selectedRole), tostring(values.fallbackRole), tonumber(values.minimumWorkerCharge) or 0, tonumber(values.workerCalloutFee) or 0, tostring(values.payrollHour), tostring(values.roundWorkerCharges))
+    else
+        hpayPrintf("Global/default policy values: unavailable (config XML could not be read)")
+    end
+    hpayPrintf("Current save settings are separate. Use: hpaySave status")
+end
+
+function HelperPayroll:printSaveSettingsStatus()
+    self:initPersistencePaths()
+    local roleId, roleName, rate, profileId = self:getSelectedRoleInfo()
+    hpayPrintf("Current save payroll settings: savegame=%s file=%s loaded=%s",
+        tostring(self.persistence ~= nil and self.persistence.savegameName or "unknown"),
+        tostring(self.persistence ~= nil and self.persistence.filePath or "nil"),
+        tostring(self.persistence ~= nil and self.persistence.loaded == true))
+    hpayPrintf("Effective active values: payrollMode=%s billingMode=%s profile=%s selectedRole=%s name=%s rate=%.2f fallbackRole=%s minimum=%.2f callout=%.2f payrollHour=%s round=%s",
+        tostring(self.settings.payrollMode), tostring(self.settings.billingMode), tostring(profileId), tostring(roleId), tostring(roleName), tonumber(rate) or 0, tostring(self.settings.fallbackRole), tonumber(self.settings.minimumWorkerCharge) or 0, tonumber(self.settings.workerCalloutFee) or 0, tostring(self.settings.payrollHour), tostring(self.settings.roundWorkerCharges))
+end
+
+function HelperPayroll:hpayConfig(...)
+    local a = hpayNormalizeArgs(...)
+    a = string.lower(tostring(a or "status"))
+
+    if a == "help" or a == "" then
+        hpayPrintf("hpayConfig commands:")
+        hpayPrintf("  status              show global/default policy config source and template values")
+        hpayPrintf("  reload              reload global/default policy, then apply current save overrides")
+        hpayPrintf("  reset               regenerate global/default policy config from bundled defaults")
+        hpayPrintf("  path                print editable global/default policy config path")
+        hpayPrintf("  save                show current save/effective settings (alias for hpaySave status)")
+        return
+    elseif a == "status" then
+        self:printPolicyTemplateStatus()
+        return
+    elseif a == "save" or a == "effective" then
+        return self:hpaySave("status")
+    elseif a == "path" then
+        self:initPolicyConfigPaths()
+        hpayPrintf("Editable global/default policy config path: %s", tostring(self.policyConfig ~= nil and self.policyConfig.externalPath or "nil"))
+        return
+    elseif a == "reload" then
+        self:loadConfig()
+        self:loadSavegameSettings()
+        hpayPrintf("Global/default policy reloaded, then current save overrides applied: source=%s file=%s saveFile=%s profile=%s payrollMode=%s billingMode=%s",
+            tostring(self.policyConfig ~= nil and self.policyConfig.source or "unknown"), tostring(self.CONFIG_FILE), tostring(self.persistence ~= nil and self.persistence.filePath or "nil"), tostring(self.settings.activePayrollProfile), tostring(self.settings.payrollMode), tostring(self.settings.billingMode))
+        return
+    elseif a == "reset" then
+        local ok = self:resetExternalPolicyConfig("console")
+        if ok then
+            self:loadConfig()
+            self:loadSavegameSettings()
+            hpayPrintf("Global/default policy config reset and reloaded; current save overrides still applied")
+        else
+            hpayPrintf("Global/default policy config reset failed")
+        end
+        return
+    end
+
+    hpayPrintf("Unknown hpayConfig subcommand '%s' (try: hpayConfig help)", tostring(a))
+end
+
+function HelperPayroll:hpaySave(...)
+    local a = hpayNormalizeArgs(...)
+    a = string.lower(tostring(a or "status"))
+
+    if a == "help" or a == "" then
+        hpayPrintf("hpaySave commands:")
+        hpayPrintf("  status              show current save/effective payroll settings")
+        hpayPrintf("  path                print current save settings path")
+        hpayPrintf("  reload              reload global/default policy, then current save settings")
+        hpayPrintf("  reset               reset current save gameplay settings from global/default policy")
+        return
+    elseif a == "status" then
+        self:printSaveSettingsStatus()
+        return
+    elseif a == "path" then
+        self:initPersistencePaths()
+        hpayPrintf("Current save payroll settings path: %s", tostring(self.persistence ~= nil and self.persistence.filePath or "nil"))
+        return
+    elseif a == "reload" then
+        self:loadConfig()
+        self:loadSavegameSettings()
+        self:printSaveSettingsStatus()
+        return
+    elseif a == "reset" then
+        self:loadConfig()
+        self:saveSavegameSettings("save-reset-from-global-policy")
+        self:loadSavegameSettings()
+        hpayPrintf("Current save payroll settings reset from global/default policy")
+        self:printSaveSettingsStatus()
+        return
+    end
+
+    hpayPrintf("Unknown hpaySave subcommand '%s' (try: hpaySave help)", tostring(a))
+end
+
 function HelperPayroll:hpayDump(...)
     local a = hpayNormalizeArgs(...)
     a = string.lower(tostring(a or "status"))
@@ -3309,6 +3895,7 @@ function HelperPayroll:hpayDump(...)
         hpayPrintf("  roles               list role rates")
         hpayPrintf("  ledger              print current ledger totals")
         hpayPrintf("  report              print payroll report summary")
+        hpayPrintf("  config              print global/default policy and current save settings")
         return
     elseif a == "roles" then
         return self:hpayRole("list")
@@ -3321,11 +3908,15 @@ function HelperPayroll:hpayDump(...)
         return
     elseif a == "report" then
         return self:hpayReport("summary")
+    elseif a == "config" then
+        self:printPolicyTemplateStatus()
+        self:printSaveSettingsStatus()
+        return
     elseif a == "status" or a == "" then
         local roleId, roleName, rate, profileId = self:getSelectedRoleInfo()
-        hpayPrintf("Status: version=0.1.9.1 payrollMode=%s profile=%s selectedRole=%s name=%s rate=%.2f roleListVisible=%s reportOverlayVisible=%s reportPage=%s trackedJobs=%d billingMode=%s saveFile=%s",
+        hpayPrintf("Status: version=0.2.3.6 payrollMode=%s profile=%s selectedRole=%s name=%s rate=%.2f roleListVisible=%s reportOverlayVisible=%s reportPage=%s trackedJobs=%d billingMode=%s saveFile=%s globalPolicySource=%s globalPolicyFile=%s",
             tostring(self.settings.payrollMode), tostring(profileId), tostring(roleId), tostring(roleName), tonumber(rate) or 0,
-            tostring(self.roleListVisible == true), tostring(self.reportOverlayVisible == true), tostring(self.reportOverlayPage or 1), tonumber(self.trackedAIJobCount) or 0, tostring(self.settings.billingMode), tostring(self.persistence ~= nil and self.persistence.filePath or "nil"))
+            tostring(self.roleListVisible == true), tostring(self.reportOverlayVisible == true), tostring(self.reportOverlayPage or 1), tonumber(self.trackedAIJobCount) or 0, tostring(self.settings.billingMode), tostring(self.persistence ~= nil and self.persistence.filePath or "nil"), tostring(self.policyConfig ~= nil and self.policyConfig.source or "unknown"), tostring(self.CONFIG_FILE))
         return
     end
 
@@ -3360,8 +3951,10 @@ function HelperPayroll:registerConsoleCommands()
     hpayRegisterConsoleCommand("hpayRole", "Inspect or change HelperPayroll selected role", "hpayRole")
     hpayRegisterConsoleCommand("hpayDump", "Dump HelperPayroll runtime status", "hpayDump")
     hpayRegisterConsoleCommand("hpayReport", "Print or export HelperPayroll payroll reports", "hpayReport")
+    hpayRegisterConsoleCommand("hpayConfig", "Inspect or reload HelperPayroll global/default policy config", "hpayConfig")
+    hpayRegisterConsoleCommand("hpaySave", "Inspect or reload HelperPayroll current save settings", "hpaySave")
     self.consoleCommandsRegistered = true
-    rcLog("Registered console commands: hpayOverlay, hpayRole, hpayDump, hpayReport")
+    rcLog("Registered console commands: hpayOverlay, hpayRole, hpayDump, hpayReport, hpayConfig, hpaySave")
 end
 
 function HelperPayroll:installMoneyHooks()
@@ -3387,6 +3980,9 @@ function HelperPayroll:initialize(reason)
     self:buildMoneyTypeNameCache()
     self:installAIWorkerHooks()
     self:installMoneyHooks()
+    if HelperPayrollMenu ~= nil and HelperPayrollMenu.register ~= nil then
+        HelperPayrollMenu.register(self.MOD_DIRECTORY)
+    end
     self.isInitialized = true
     rcLog("Initialized")
 end
