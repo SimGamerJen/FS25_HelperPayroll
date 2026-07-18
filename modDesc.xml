@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8" standalone="no" ?>
+<modDesc descVersion="110">
+    <author>SimGamerJen</author>
+    <version>0.3.3.1</version>
+    <title>
+        <en>Helper Payroll Beta</en>
+    </title>
+    <description>
+        <en>0.3.3.1 beta release candidate: Fixes management-menu reload/reset controls and preserves save-specific custom payroll roles, names, rates, and display order.</en>
+    </description>
+    <iconFilename>HelperPayroll_icon.dds</iconFilename>
+    <multiplayer supported="false" />
+
+    <l10n>
+        <text name="input_HELPERPAYROLL_CYCLE_ROLE">
+            <en>Helper Payroll: Cycle Role</en>
+        </text>
+        <text name="input_HELPERPAYROLL_TOGGLE_ROLE_LIST">
+            <en>Helper Payroll: Toggle Role List</en>
+        </text>
+        <text name="input_HELPERPAYROLL_TOGGLE_REPORT_OVERLAY">
+            <en>Helper Payroll: Toggle Report Overlay</en>
+        </text>
+        <text name="input_HELPERPAYROLL_TOGGLE_MANAGEMENT_MENU">
+            <en>Helper Payroll: Management Menu</en>
+        </text>
+    </l10n>
+
+    <actions>
+        <action name="HELPERPAYROLL_CYCLE_ROLE" category="ONFOOT VEHICLE" axisType="HALF" />
+        <action name="HELPERPAYROLL_TOGGLE_ROLE_LIST" category="ONFOOT VEHICLE" axisType="HALF" />
+        <action name="HELPERPAYROLL_TOGGLE_REPORT_OVERLAY" category="ONFOOT VEHICLE" axisType="HALF" />
+        <action name="HELPERPAYROLL_TOGGLE_MANAGEMENT_MENU" category="ONFOOT VEHICLE" axisType="HALF" />
+    </actions>
+
+    <inputBinding>
+        <actionBinding action="HELPERPAYROLL_CYCLE_ROLE">
+            <binding device="KB_MOUSE_DEFAULT" input="KEY_semicolon" />
+        </actionBinding>
+        <actionBinding action="HELPERPAYROLL_TOGGLE_ROLE_LIST">
+            <binding device="KB_MOUSE_DEFAULT" input="KEY_rctrl KEY_semicolon" />
+        </actionBinding>
+        <actionBinding action="HELPERPAYROLL_TOGGLE_REPORT_OVERLAY">
+            <binding device="KB_MOUSE_DEFAULT" input="KEY_rctrl KEY_p" />
+        </actionBinding>
+        <actionBinding action="HELPERPAYROLL_TOGGLE_MANAGEMENT_MENU">
+            <binding device="KB_MOUSE_DEFAULT" input="KEY_rctrl KEY_h" />
+        </actionBinding>
+    </inputBinding>
+
+    <extraSourceFiles>
+        <sourceFile filename="scripts/gui/HelperPayrollMenu.lua" />
+        <sourceFile filename="scripts/HelperPayroll.lua" />
+    </extraSourceFiles>
+</modDesc>
