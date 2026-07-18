@@ -165,3 +165,11 @@ Planned next steps:
 6. Wider AI job type testing.
 
 Contract reward realism is now intended to become a separate future mod, likely `FS25_ContractRateCard`.
+
+---
+
+## Licence and Permissions
+
+Copyright © 2026 SimGamerJen. All rights reserved.
+
+You may download and use this mod for personal use. You may not modify, redistribute, re-upload, or publish this mod, in whole or in part, or any derivative version without prior written permission from SimGamerJen.
