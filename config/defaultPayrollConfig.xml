@@ -39,29 +39,29 @@
     </profiles>
 
     <workerRates profile="default">
-        <worker id="owner" name="Owner Labour" hourlyRate="0" />
-        <worker id="trainee" name="Trainee Helper" hourlyRate="10" />
-        <worker id="standard" name="Standard Helper" hourlyRate="18" />
-        <worker id="skilled" name="Skilled Operator" hourlyRate="22" />
-        <worker id="contractor" name="Contractor" hourlyRate="30" />
+        <worker id="owner" name="Owner Labour" payBasis="hourly" rate="0" minimumCallout="0" />
+        <worker id="trainee" name="Trainee Helper" payBasis="hourly" rate="10" minimumCallout="5" />
+        <worker id="standard" name="Standard Helper" payBasis="hourly" rate="18" minimumCallout="5" />
+        <worker id="skilled" name="Skilled Operator" payBasis="hourly" rate="22" minimumCallout="5" />
+        <worker id="contractor" name="Contractor" payBasis="hourly" rate="30" minimumCallout="5" />
     </workerRates>
 
     <workerRates profile="uk_tenant">
-        <worker id="owner" name="Owner Labour" hourlyRate="0" />
-        <worker id="trainee" name="Trainee Helper" hourlyRate="10" />
-        <worker id="standard" name="General Farmhand" hourlyRate="14" />
-        <worker id="skilled" name="Skilled Operator" hourlyRate="18" />
-        <worker id="manager" name="Farm Manager" hourlyRate="24" />
-        <worker id="contractor" name="External Contractor" hourlyRate="28" />
+        <worker id="owner" name="Owner Labour" payBasis="hourly" rate="0" minimumCallout="0" />
+        <worker id="trainee" name="Trainee Helper" payBasis="hourly" rate="10" minimumCallout="5" />
+        <worker id="standard" name="General Farmhand" payBasis="hourly" rate="14" minimumCallout="5" />
+        <worker id="skilled" name="Skilled Operator" payBasis="hourly" rate="18" minimumCallout="5" />
+        <worker id="manager" name="Farm Manager" payBasis="hourly" rate="24" minimumCallout="5" />
+        <worker id="contractor" name="External Contractor" payBasis="hourly" rate="28" minimumCallout="5" />
     </workerRates>
 
     <workerRates profile="us_ranch">
-        <worker id="owner" name="Owner Labour" hourlyRate="0" />
-        <worker id="trainee" name="Trainee Ranch Hand" hourlyRate="14" />
-        <worker id="standard" name="Ranch Hand" hourlyRate="18" />
-        <worker id="skilled" name="Skilled Operator" hourlyRate="24" />
-        <worker id="manager" name="Ranch Manager" hourlyRate="30" />
-        <worker id="contractor" name="External Contractor" hourlyRate="35" />
+        <worker id="owner" name="Owner Labour" payBasis="hourly" rate="0" minimumCallout="0" />
+        <worker id="trainee" name="Trainee Ranch Hand" payBasis="hourly" rate="14" minimumCallout="5" />
+        <worker id="standard" name="Ranch Hand" payBasis="hourly" rate="18" minimumCallout="5" />
+        <worker id="skilled" name="Skilled Operator" payBasis="hourly" rate="24" minimumCallout="5" />
+        <worker id="manager" name="Ranch Manager" payBasis="hourly" rate="30" minimumCallout="5" />
+        <worker id="contractor" name="External Contractor" payBasis="hourly" rate="35" minimumCallout="5" />
     </workerRates>
 
     <!-- Advanced mode only: used when payrollMode="helperSlot". -->
