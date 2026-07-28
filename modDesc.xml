@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8" standalone="no" ?>
 <modDesc descVersion="110">
     <author>SimGamerJen</author>
-    <version>0.4.1.1</version>
+    <version>0.4.2.0</version>
     <title>
         <en>Helper Payroll Alpha</en>
     </title>
     <description>
-        <en>0.4.1.1 Alpha 2: Publishes the role-assignment API globally and on the active mission so HelperProfiles can discover it reliably. Retains the public role-assignment API for HelperProfiles while retaining hourly or daily compensation and per-worker overrides.</en>
+        <en>0.4.2.0 Alpha 1: Extends HelperPayroll identity, role assignment, worker overrides and job-slot detection from A-J to A-T for the twenty-helper HelperProfiles roster. Existing A-J save mappings remain compatible.</en>
     </description>
     <iconFilename>HelperPayroll_icon.dds</iconFilename>
     <multiplayer supported="false" />

@@ -10,7 +10,7 @@
 
         <!--
             roleType  = vanilla-friendly mode; all AI jobs use selectedRole for payroll.
-            helperSlot = advanced/roleplay mode; detected vanilla helper slot A-J resolves to helperSlots below.
+            helperSlot = advanced/roleplay mode; detected helper slot A-T resolves to helperSlots below.
         -->
         <payrollMode>roleType</payrollMode>
         <selectedRole>standard</selectedRole>
@@ -76,6 +76,16 @@
         <helper slot="H" name="Helper H" role="Standard Helper" workerRate="standard" />
         <helper slot="I" name="Helper I" role="Standard Helper" workerRate="standard" />
         <helper slot="J" name="Helper J" role="Standard Helper" workerRate="standard" />
+        <helper slot="K" name="Helper K" role="Standard Helper" workerRate="standard" />
+        <helper slot="L" name="Helper L" role="Standard Helper" workerRate="standard" />
+        <helper slot="M" name="Helper M" role="Standard Helper" workerRate="standard" />
+        <helper slot="N" name="Helper N" role="Standard Helper" workerRate="standard" />
+        <helper slot="O" name="Helper O" role="Standard Helper" workerRate="standard" />
+        <helper slot="P" name="Helper P" role="Standard Helper" workerRate="standard" />
+        <helper slot="Q" name="Helper Q" role="Standard Helper" workerRate="standard" />
+        <helper slot="R" name="Helper R" role="Standard Helper" workerRate="standard" />
+        <helper slot="S" name="Helper S" role="Standard Helper" workerRate="standard" />
+        <helper slot="T" name="Helper T" role="Standard Helper" workerRate="standard" />
     </helperSlots>
 
     <!-- Example roleplay setup for use with HelperProfiles-style helper slot identities. -->

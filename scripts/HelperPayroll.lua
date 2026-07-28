@@ -1,5 +1,5 @@
 -- Helper Payroll
--- Version: 0.4.1.1-alpha2
+-- Version: 0.4.2.0-alpha1
 -- Purpose:
 --   1. Suppress vanilla AI worker payments.
 --   2. Track active AI jobs.
@@ -14,8 +14,9 @@ local hpGetTimeMs
 
 HelperPayroll = {}
 HelperPayroll.MOD_NAME = g_currentModName or "FS25_HelperPayroll"
-HelperPayroll.VERSION = "0.4.1.1"
-HelperPayroll.RELEASE_CHANNEL = "alpha2"
+HelperPayroll.VERSION = "0.4.2.0"
+HelperPayroll.RELEASE_CHANNEL = "alpha1"
+HelperPayroll.TARGET_HELPER_SLOTS = 20
 HelperPayroll.MOD_DIRECTORY = g_currentModDirectory or ""
 HelperPayroll.BUNDLED_CONFIG_FILE = HelperPayroll.MOD_DIRECTORY .. "config/defaultPayrollConfig.xml"
 HelperPayroll.CONFIG_FILE = HelperPayroll.BUNDLED_CONFIG_FILE
@@ -194,7 +195,7 @@ local HPAY_DEFAULT_POLICY_XML = [=[
 
         <!--
             roleType  = vanilla-friendly mode; all AI jobs use selectedRole for payroll.
-            helperSlot = advanced/roleplay mode; detected vanilla helper slot A-J resolves to helperSlots below.
+            helperSlot = advanced/roleplay mode; detected helper slot A-T resolves to helperSlots below.
         -->
         <payrollMode>roleType</payrollMode>
         <selectedRole>standard</selectedRole>
@@ -260,6 +261,16 @@ local HPAY_DEFAULT_POLICY_XML = [=[
         <helper slot="H" name="Helper H" role="Standard Helper" workerRate="standard" />
         <helper slot="I" name="Helper I" role="Standard Helper" workerRate="standard" />
         <helper slot="J" name="Helper J" role="Standard Helper" workerRate="standard" />
+        <helper slot="K" name="Helper K" role="Standard Helper" workerRate="standard" />
+        <helper slot="L" name="Helper L" role="Standard Helper" workerRate="standard" />
+        <helper slot="M" name="Helper M" role="Standard Helper" workerRate="standard" />
+        <helper slot="N" name="Helper N" role="Standard Helper" workerRate="standard" />
+        <helper slot="O" name="Helper O" role="Standard Helper" workerRate="standard" />
+        <helper slot="P" name="Helper P" role="Standard Helper" workerRate="standard" />
+        <helper slot="Q" name="Helper Q" role="Standard Helper" workerRate="standard" />
+        <helper slot="R" name="Helper R" role="Standard Helper" workerRate="standard" />
+        <helper slot="S" name="Helper S" role="Standard Helper" workerRate="standard" />
+        <helper slot="T" name="Helper T" role="Standard Helper" workerRate="standard" />
     </helperSlots>
 
     <!-- Example roleplay setup for use with HelperProfiles-style helper slot identities. -->
@@ -1839,21 +1850,78 @@ function HelperPayroll:diagnosticScanAIJobForHelperProfiles(job, tracked)
     rcLog("HelperProfiles diagnostic end: seq=%s candidatesLogged=%d", tostring(seq), tonumber(printed.count) or 0)
 end
 
+function HelperPayroll:indexToHelperSlot(index)
+    index = math.floor(tonumber(index) or 0)
+    if index < 1 or index > (tonumber(self.TARGET_HELPER_SLOTS) or 20) then return nil end
+
+    local label = ""
+    while index > 0 do
+        local remainder = (index - 1) % 26
+        label = string.char(string.byte("A") + remainder) .. label
+        index = math.floor((index - 1) / 26)
+    end
+    return label
+end
+
+function HelperPayroll:normaliseHelperSlot(slot)
+    if slot == nil then return nil, nil end
+    local limit = tonumber(self.TARGET_HELPER_SLOTS) or 20
+    local numeric = tonumber(slot)
+    if numeric ~= nil then
+        local index = math.floor(numeric)
+        if index >= 1 and index <= limit then return self:indexToHelperSlot(index), index end
+        return nil, nil
+    end
+
+    local text = string.upper(tostring(slot or "")):gsub("^%s+", ""):gsub("%s+$", "")
+    text = text:gsub("^SLOT:%s*", "")
+    text = text:gsub("^HELPER:%s*", "")
+    local canonical = text:match("^HELPER0*(%d+)$")
+    if canonical ~= nil then
+        local index = tonumber(canonical)
+        if index ~= nil and index >= 1 and index <= limit then return self:indexToHelperSlot(index), index end
+        return nil, nil
+    end
+    local helperLabel = text:match("^HELPER%s+([A-Z]+)$")
+    if helperLabel ~= nil then text = helperLabel end
+    if text == "" or text:match("^[A-Z]+$") == nil then return nil, nil end
+
+    local index = 0
+    for i = 1, #text do index = index * 26 + (string.byte(text, i) - string.byte("A") + 1) end
+    if index < 1 or index > limit then return nil, nil end
+    return self:indexToHelperSlot(index), index
+end
+
+function HelperPayroll:getManagedHelperSlotCount()
+    local api = self:getHelperProfilesAPI(false)
+    if api ~= nil and type(api.getStatus) == "function" then
+        local ok, status = pcall(api.getStatus, api)
+        if ok and type(status) == "table" then
+            local count = tonumber(status.managedSlotCount or status.profileCount or status.targetSlotCount)
+            if count ~= nil and count > 0 then return math.min(math.floor(count), tonumber(self.TARGET_HELPER_SLOTS) or 20) end
+        end
+    end
+
+    if g_helperManager ~= nil then
+        local count = tonumber(g_helperManager.numHelpers)
+        if g_helperManager.getNumOfHelpers ~= nil then
+            local ok, result = pcall(g_helperManager.getNumOfHelpers, g_helperManager)
+            if ok and tonumber(result) ~= nil then count = tonumber(result) end
+        end
+        if count ~= nil and count > 0 then return math.min(math.floor(count), tonumber(self.TARGET_HELPER_SLOTS) or 20) end
+    end
+    return 10
+end
+
+function HelperPayroll:getManagedHelperSlots()
+    local slots = {}
+    for index = 1, self:getManagedHelperSlotCount() do slots[index] = self:indexToHelperSlot(index) end
+    return slots
+end
+
 function HelperPayroll:helperIndexToSlot(helperIndex)
-    local index = tonumber(helperIndex)
-
-    if index == nil then
-        return nil
-    end
-
-    index = math.floor(index)
-
-    if index < 1 or index > 10 then
-        return nil
-    end
-
-    -- FS helper slots are A-J. Diagnostics confirmed job.helperIndex=2 maps to helper B.
-    return string.char(string.byte("A") + index - 1)
+    local slot = self:normaliseHelperSlot(helperIndex)
+    return slot
 end
 
 function HelperPayroll:detectHelperSlotForJob(job, tracked)
@@ -1956,10 +2024,10 @@ function HelperPayroll:isHelperProfilesModLoaded()
 end
 
 function HelperPayroll:getHelperProfilesAPI(validateVersion)
-    local mission = g_currentMission
-    if mission == nil then return nil end
-
-    local api = mission.fs25HelperProfilesAPI or mission.helperProfilesAPI
+    local api = rawget(_G, "FS25_HelperProfiles_API") or rawget(_G, "FS25_HelperProfilesAPI")
+    if type(api) ~= "table" and g_currentMission ~= nil then
+        api = g_currentMission.fs25HelperProfilesAPI or g_currentMission.helperProfilesAPI
+    end
     if type(api) ~= "table" then return nil end
 
     if validateVersion ~= false then
@@ -1998,12 +2066,8 @@ function HelperPayroll:isHelperProfilesAvailable()
 end
 
 function HelperPayroll:slotToHelperProfilesIndex(slot)
-    if slot == nil then return nil end
-    local s = string.upper(tostring(slot or ""))
-    if #s ~= 1 then return nil end
-    local idx = string.byte(s) - string.byte("A") + 1
-    if idx < 1 or idx > 10 then return nil end
-    return idx
+    local _, index = self:normaliseHelperSlot(slot)
+    return index
 end
 
 function HelperPayroll:getHelperProfilesSlotInfo(slot)
@@ -2019,7 +2083,9 @@ function HelperPayroll:getHelperProfilesSlotInfo(slot)
         slot = tostring(data.slot or string.upper(tostring(slot))),
         index = tonumber(data.index) or idx,
         helper = nil,
+        canonicalId = data.canonicalId ~= nil and tostring(data.canonicalId) or nil,
         identityId = data.identityId ~= nil and tostring(data.identityId) or nil,
+        identityAliases = type(data.identityAliases) == "table" and data.identityAliases or {},
         identitySource = data.identitySource ~= nil and tostring(data.identitySource) or nil,
         baseName = data.baseName,
         displayName = tostring(data.displayName or data.baseName or ("Helper " .. string.upper(tostring(slot)))),
@@ -2126,6 +2192,10 @@ function HelperPayroll:rebuildHelperProfilesMappingIndexes()
             if mapping.identityId ~= nil and tostring(mapping.identityId) ~= "" then
                 self.helperProfilesMappingsByIdentity[tostring(mapping.identityId)] = mapping
             end
+            if mapping.canonicalId ~= nil and tostring(mapping.canonicalId) ~= "" then
+                self.helperProfilesMappingsByIdentity[tostring(mapping.canonicalId)] = mapping
+                self.helperProfilesMappingsByIdentity["helper:" .. tostring(mapping.canonicalId)] = mapping
+            end
             if mapping.slot ~= nil and tostring(mapping.slot) ~= "" then
                 self.helperProfilesMappingsBySlot[string.upper(tostring(mapping.slot))] = mapping
             end
@@ -2138,13 +2208,16 @@ function HelperPayroll:getHelperProfilesPayrollMapping(slotInfo, slot)
     local identityId = slotInfo ~= nil and slotInfo.identityId ~= nil and tostring(slotInfo.identityId) or nil
     if identityId ~= nil and identityId ~= "" then
         local mapping = self.helperProfilesMappingsByIdentity[identityId]
-        if mapping ~= nil then
-            return mapping, "identity"
-        end
-        -- API v2 preset identities are authoritative. Do not inherit a stale mapping
-        -- merely because a different named worker has moved into the old A-J slot.
-        if string.sub(identityId, 1, 5) ~= "slot:" then
-            return nil, "none"
+        if mapping ~= nil then return mapping, "identity" end
+
+        -- Preset identities are authoritative. Do not inherit a stale mapping merely
+        -- because a different named worker has moved into the old slot. Canonical
+        -- aliases are only consulted for slot-fallback identities.
+        if string.sub(identityId, 1, 5) ~= "slot:" then return nil, "none" end
+
+        for _, alias in ipairs(slotInfo ~= nil and slotInfo.identityAliases or {}) do
+            mapping = self.helperProfilesMappingsByIdentity[tostring(alias)]
+            if mapping ~= nil then return mapping, "identity-alias" end
         end
     end
     if slot ~= nil then
@@ -2167,6 +2240,7 @@ function HelperPayroll:setHelperProfilesPayrollMapping(slotInfo, slot, roleId)
         table.insert(self.helperProfilesMappings, mapping)
     end
     mapping.identityId = identityId
+    mapping.canonicalId = slotInfo ~= nil and slotInfo.canonicalId or nil
     mapping.identitySource = slotInfo ~= nil and slotInfo.identitySource or "slotFallback"
     mapping.slot = slot
     mapping.helperName = slotInfo ~= nil and slotInfo.displayName or (slot ~= nil and ("Helper " .. slot) or "Helper")
@@ -2200,11 +2274,8 @@ end
 -- The API owns all payroll validation and persistence; callers never edit payroll XML
 -- or internal mapping tables directly.
 function HelperPayroll:normaliseIntegrationSlot(slot)
-    local text = string.upper(tostring(slot or "")):gsub("^%s+", ""):gsub("%s+$", "")
-    if #text ~= 1 or text < "A" or text > "J" then
-        return nil
-    end
-    return text
+    local normalized = self:normaliseHelperSlot(slot)
+    return normalized
 end
 
 function HelperPayroll:getIntegrationRoleRows()
@@ -2246,7 +2317,9 @@ function HelperPayroll:getIntegrationRoleForSlot(slot)
 
     return {
         slot = normalizedSlot,
+        canonicalId = slotInfo ~= nil and slotInfo.canonicalId or nil,
         identityId = slotInfo ~= nil and slotInfo.identityId or ("slot:" .. normalizedSlot),
+        identityAliases = slotInfo ~= nil and slotInfo.identityAliases or {"slot:" .. normalizedSlot},
         identitySource = slotInfo ~= nil and slotInfo.identitySource or "slotFallback",
         helperName = slotInfo ~= nil and slotInfo.displayName or ("Helper " .. normalizedSlot),
         roleId = tostring(roleId),
@@ -2307,9 +2380,9 @@ end
 function HelperPayroll:buildIntegrationAPI()
     local owner = self
     local api = {
-        apiVersion = 1,
+        apiVersion = 2,
         modName = "FS25_HelperPayroll",
-        modVersion = tostring(self.VERSION or "0.4.1.1"),
+        modVersion = tostring(self.VERSION or "0.4.2.0"),
         readOnly = false
     }
 
@@ -2321,7 +2394,9 @@ function HelperPayroll:buildIntegrationAPI()
             modVersion = self.modVersion,
             activePayrollProfile = tostring(owner.settings.activePayrollProfile or "default"),
             payrollMode = tostring(owner.settings.payrollMode or "roleType"),
-            billingMode = tostring(owner.settings.billingMode or "onJobFinish")
+            billingMode = tostring(owner.settings.billingMode or "onJobFinish"),
+            managedSlotCount = owner:getManagedHelperSlotCount(),
+            targetSlotCount = tonumber(owner.TARGET_HELPER_SLOTS) or 20
         }
     end
 
@@ -2331,6 +2406,14 @@ function HelperPayroll:buildIntegrationAPI()
 
     function api:getRoleForSlot(slot)
         return owner:getIntegrationRoleForSlot(slot)
+    end
+
+    function api:getSlots()
+        local rows = {}
+        for index, slot in ipairs(owner:getManagedHelperSlots()) do
+            rows[index] = owner:getIntegrationRoleForSlot(slot)
+        end
+        return rows
     end
 
     function api:applyRoleMappings(roleMappings, reason)
@@ -2344,7 +2427,7 @@ function HelperPayroll:publishIntegrationAPI(reason)
     if self.integrationAPI == nil then
         self.integrationAPI = self:buildIntegrationAPI()
     end
-    self.integrationAPI.modVersion = tostring(self.VERSION or "0.4.1.1")
+    self.integrationAPI.modVersion = tostring(self.VERSION or "0.4.2.0")
 
     -- Publish globally as well as on the mission. GUI dialogs can be created
     -- during a different mission lifecycle phase, so mission-only publication
@@ -3735,6 +3818,7 @@ function HelperPayroll:loadSavegameSettings()
         if not hasXMLProperty(xmlFile, key) then break end
         local mapping = {
             identityId = getXmlStringOrDefault(xmlFile, key .. "#identityId", ""),
+            canonicalId = getXmlStringOrDefault(xmlFile, key .. "#canonicalId", ""),
             identitySource = getXmlStringOrDefault(xmlFile, key .. "#identitySource", ""),
             slot = string.upper(getXmlStringOrDefault(xmlFile, key .. "#slot", "")),
             helperName = getXmlStringOrDefault(xmlFile, key .. "#helperName", ""),
@@ -3914,6 +3998,7 @@ function HelperPayroll:saveSavegameSettings(reason)
     for i, mapping in ipairs(mappings) do
         local key = string.format("helperPayrollSave.helperProfilesMappings.worker(%d)", i - 1)
         setXMLString(xmlFile, key .. "#identityId", tostring(mapping.identityId or ""))
+        setXMLString(xmlFile, key .. "#canonicalId", tostring(mapping.canonicalId or ""))
         setXMLString(xmlFile, key .. "#identitySource", tostring(mapping.identitySource or ""))
         setXMLString(xmlFile, key .. "#slot", tostring(mapping.slot or ""))
         setXMLString(xmlFile, key .. "#helperName", tostring(mapping.helperName or ""))
@@ -5057,7 +5142,7 @@ function HelperPayroll:hpayProfiles(...)
     if a == "help" or a == "" then
         hpayPrintf("hpayProfiles commands:")
         hpayPrintf("  status              show HelperProfiles mod/API integration status")
-        hpayPrintf("  slots               list HelperProfiles A-J identities and HelperPayroll slot mappings")
+        hpayPrintf("  slots               list HelperProfiles A-T identities and HelperPayroll slot mappings")
         hpayPrintf("  refresh             refresh and display integration status")
         return
     end
@@ -5096,7 +5181,7 @@ function HelperPayroll:hpayProfiles(...)
 
         if status.available then
             if self:isHelperSlotPayrollMode() then
-                hpayPrintf("helperSlot mode active. job.helperIndex selects A-J; HelperProfiles API supplies live identity and HelperPayroll applies the per-save identity/slot payroll mapping.")
+                hpayPrintf("helperSlot mode active. job.helperIndex selects A-T; HelperProfiles API supplies live identity and HelperPayroll applies the per-save identity/slot payroll mapping.")
             else
                 hpayPrintf("HelperProfiles is integrated, but roleType mode remains active and uses the selected payroll role.")
             end
@@ -5110,8 +5195,7 @@ function HelperPayroll:hpayProfiles(...)
     elseif a == "slots" or a == "list" then
         local _, profileId = self:getActiveProfile()
         hpayPrintf("HelperProfiles/HelperPayroll slot mapping: profile=%s payrollMode=%s source=%s", tostring(profileId), tostring(self.settings.payrollMode), tostring(status.source))
-        for i = 1, 10 do
-            local slot = string.char(string.byte("A") + i - 1)
+        for _, slot in ipairs(self:getManagedHelperSlots()) do
             local hpInfo = self:getHelperProfilesSlotInfo(slot)
             local hpName = hpInfo ~= nil and hpInfo.displayName or ("Helper " .. slot)
             local identityId = hpInfo ~= nil and hpInfo.identityId or ("slot:" .. slot)
