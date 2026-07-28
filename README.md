@@ -1,97 +1,151 @@
 # FS25 HelperPayroll
 
-**FS25 HelperPayroll** replaces Farming Simulator 25's continuous AI-worker wage deductions with a configurable payroll system.
+**FS25 HelperPayroll** replaces Farming Simulator 25's continuous AI-worker wage deductions with a configurable, save-specific payroll system.
 
-Instead of paying every helper at one fixed game-controlled rate, farms can define payroll roles, set their own hourly rates, choose when charges are settled, assign roles to individual A–J helper slots, and review a persistent payroll ledger.
+It supports role-based and named-worker compensation, hourly or daily pay, per-role minimum call-outs, per-worker overrides, immediate or scheduled settlement, persistent ledger reporting, and optional integration with HelperProfiles.
 
-The mod works independently in its default `roleType` mode. Optional integration with [FS25 HelperProfiles](https://github.com/SimGamerJen/FS25_HelperProfiles) adds live worker identities and save-specific role mappings.
-
-> **Current release:** `0.3.3.1` beta release candidate  
+> **Current version:** `0.4.1.1` Alpha 2  
 > **Game:** Farming Simulator 25  
-> **Multiplayer:** Not currently supported
-
----
+> **Multiplayer:** Not supported
 
 ## Main Features
 
-- Suppresses the game's normal AI-worker wage deductions.
-- Calculates custom labour charges from configurable payroll roles.
-- Includes Owner, Trainee, Standard, Skilled and Contractor defaults.
-- Supports immediate job-finish billing or scheduled daily payroll.
-- Supports a global minimum charge and call-out fee.
-- Provides a game-styled payroll-management screen.
-- Supports role-based and A–J helper-slot payroll modes.
-- Stores settings and worker mappings separately for each savegame.
-- Records persistent payroll history by month, role, helper and job.
-- Provides an in-game role list, report overlay and console tools.
-- Optionally consumes live worker identities from an API-enabled HelperProfiles build.
-- Captures the worker assignment when a job starts, preventing later role changes from altering a job already in progress.
-- Uses the authoritative game clock for accelerated-time-safe daily payroll.
+- Suppresses the game's normal continuous AI-worker wage deductions.
+- Calculates custom worker charges from configurable payroll policies.
+- Supports `roleType` and `helperSlot` payroll modes.
+- Supports hourly and daily compensation independently of payment timing.
+- Configures pay basis, rate, and minimum call-out for each role.
+- Allows each worker to inherit role terms or use a custom override.
+- Supports immediate `onJobFinish` settlement or scheduled `dailyPayroll`.
+- Supports a global call-out fee and optional charge rounding.
+- Stores settings, role policies, worker mappings, and pending payroll per savegame.
+- Captures worker and compensation terms when a job starts.
+- Records persistent payroll history by period, role, worker, and job.
+- Provides an FS25-style management screen, overlays, reports, and console tools.
+- Publishes an optional API used by HelperProfiles for role assignment and display.
 
----
+## Installation
 
-## How Payroll Works
-
-### Payroll modes
-
-HelperPayroll provides two worker-assignment modes.
-
-#### `roleType`
-
-This is the default, standalone-friendly mode.
-
-Every new AI job uses the currently selected payroll role. For example, selecting **Skilled Operator** causes subsequently started jobs to use that role and its configured hourly rate.
-
-The assignment is captured when the job starts. Changing the selected role afterwards does not retroactively change an active job.
-
-#### `helperSlot`
-
-This mode assigns payroll roles to the detected vanilla helper slots A–J.
-
-It can operate with slot fallbacks from the payroll policy, but is intended for advanced use with HelperProfiles. When a compatible HelperProfiles API is available, HelperPayroll can use live worker names and stable identities while retaining save-specific payroll mappings.
-
-### Billing modes
-
-#### `onJobFinish`
-
-The calculated charge is deducted when an AI job finishes.
-
-For each completed job:
+1. Download `FS25_HelperPayroll.zip`.
+2. Place the ZIP directly in the Farming Simulator 25 mods folder. Do not unpack it.
 
 ```text
-labour = elapsed hours × hourly rate
-subtotal = labour + call-out fee
-charge = maximum(subtotal, minimum charge)
+Documents/My Games/FarmingSimulator2025/mods
 ```
 
-The minimum is only applied when the calculated subtotal is greater than zero.
+3. Enable **Helper Payroll Alpha** for the intended savegame.
+4. Optionally enable [FS25 HelperProfiles](https://github.com/SimGamerJen/FS25_HelperProfiles) for named helper identities, in-game profile role assignment, and the HelperProfiles overlay role column.
 
-#### `dailyPayroll`
+Alpha builds should be tested on a copied savegame before being used in an important playthrough.
 
-Completed jobs are aggregated by worker and game day. At the configured payroll hour, HelperPayroll makes one payment for each worker with recorded work that day.
+## Default Controls
 
-For each worker/day:
+Keybinds can be reassigned in the Farming Simulator controls menu.
+
+| Action | Default binding | Description |
+|---|---:|---|
+| Cycle payroll role | `;` | Selects the next role in standalone `roleType` mode. |
+| Toggle role list | `RCTRL + ;` | Shows or hides the standalone role list. |
+| Toggle report overlay | `RCTRL + P` | Shows or hides the payroll report. |
+| Open management screen | `RCTRL + H` | Opens the full payroll-management UI. |
+
+When HelperProfiles is active, it owns the semicolon key family. HelperPayroll suppresses its standalone `;` and `RCTRL + ;` actions for that session to avoid conflicts. The management and report shortcuts remain available.
+
+## Core Concepts
+
+HelperPayroll separates three decisions:
+
+1. **Who is assigned?**  
+   Controlled by the payroll mode and worker-role mapping.
+
+2. **How is the worker paid?**  
+   Controlled by the role or worker compensation policy: hourly or daily.
+
+3. **When is the charge settled?**  
+   Controlled by the billing mode: on job finish or at the daily payroll hour.
+
+Changing one does not automatically change the others.
+
+## Payroll Modes
+
+### `roleType`
+
+Standalone-friendly default.
+
+Every new AI job uses the currently selected payroll role. The selected role and its compensation terms are captured when the job starts.
+
+### `helperSlot`
+
+Assigns roles to the deployed helper slot A–J.
+
+- Works with slot fallbacks when HelperProfiles is absent.
+- Uses live display names and stable identities when the HelperProfiles API is available.
+- Stores identity and slot mappings in the current save.
+- Supports separate custom compensation overrides for each worker.
+
+## Compensation Policies
+
+### Hourly pay
+
+Hourly work is based on the recorded job duration and the effective hourly rate.
 
 ```text
-subtotal = combined labour + one call-out fee
-charge = maximum(subtotal, minimum charge)
+labour = worked hours × rate
+subtotal = labour + applicable call-out fee
+charge = maximum(subtotal, effective minimum call-out)
 ```
 
-Unpaid rows from an earlier game day are treated as overdue and settle automatically.
+The effective minimum comes from the worker override when custom compensation is enabled, otherwise from the assigned role. Older save data can fall back to the legacy global minimum.
 
-> `dailyPayroll` is a scheduled settlement mode, not a fixed daily salary. The current minimum charge is global and only applies to workers with recorded chargeable work.
+### Daily pay
 
-### Current limitation
+A daily worker is charged once per worker per in-game day when that worker completes chargeable work.
 
-Version 0.3.3.1 uses hourly role rates. The minimum charge and call-out fee are global for the save, rather than configurable per role or per worker.
+- The role or worker rate is interpreted as a daily rate.
+- Multiple completed jobs by the same worker on the same game day do not create multiple daily-rate charges.
+- Minimum call-out is ignored for daily compensation.
+- Payment timing still follows the selected billing mode.
 
-Per-role and per-worker hourly/daily pay policies are planned for a later development phase.
+### Role policy
 
----
+Each role defines:
+
+- `payBasis`: `hourly` or `daily`
+- `rate`: hourly or daily amount
+- `minimumCallout`: minimum charge when the role is hourly
+
+### Worker override
+
+Each A–J worker can use:
+
+- `inherit`: uses the assigned role policy
+- `custom`: uses the worker's own pay basis, rate, and minimum call-out
+
+This allows a role to be hourly by default while one named worker is paid a fixed daily amount.
+
+## Billing Modes
+
+### `onJobFinish`
+
+Completed work is settled immediately.
+
+- Hourly work is calculated when the job finishes.
+- Daily compensation is applied once for that worker and game day.
+- The global call-out fee is applied according to the current billing rules.
+
+### `dailyPayroll`
+
+Completed work is accumulated and settled at the configured in-game payroll hour.
+
+- Pending rows are grouped by worker and game day.
+- Earlier unpaid days are treated as overdue and settle automatically.
+- The authoritative game clock is used so accelerated time cannot silently skip a due payroll row.
+
+`dailyPayroll` controls settlement timing; it does not force every role to use daily compensation.
 
 ## Management Screen
 
-Open the payroll-management screen with:
+Open the screen with:
 
 ```text
 RCTRL + H
@@ -101,90 +155,88 @@ The screen contains six tabs:
 
 | Tab | Purpose |
 |---|---|
-| **Overview** | Displays the active profile, modes, selected role, policy values, integration status and save path. |
-| **Billing** | Configures payroll mode, billing mode, payroll hour, minimum charge, call-out fee and rounding. |
-| **Roles** | Displays the active role list and allows existing hourly rates to be adjusted. |
-| **Workers** | Assigns payroll roles to A–J helper slots or HelperProfiles identities. |
+| **Overview** | Shows active profile, modes, selected role, integration status, pending payroll, and save path. |
+| **Billing** | Edits payroll mode, billing mode, payroll hour, legacy minimum, global call-out fee, and rounding. |
+| **Roles** | Edits each role's pay basis, rate, and minimum call-out. |
+| **Workers** | Assigns roles and configures inherited or custom worker compensation. |
 | **Ledger** | Displays persistent payroll totals. |
-| **Help** | Explains the management workflow and current modes. |
+| **Help** | Explains assignment, compensation, and settlement. |
 
 Changes are staged until **Apply** is selected. **Discard** restores the currently loaded values.
 
 ### Reload and reset
 
-- **Reload Save** reloads the global policy and then reapplies the current save-specific settings. Its default button-bar shortcut is `X`.
-- **Reset Save** has no competing `X` shortcut. It requires a second **Confirm Reset** action before replacing the current save's payroll policy, role list and mappings with the global defaults.
+- **Reload Save** reloads the global policy and reapplies the current save-specific settings.
+- **Reset Save** requires a second confirmation before replacing the current save's payroll settings with the global defaults.
+- `hpaySave reset` performs the reset immediately and does not show the management-screen confirmation.
 
-Resetting a save is destructive for that save's custom payroll configuration. It does not overwrite the global `defaultPayrollConfig.xml` file.
+Resetting a save does not overwrite the global `defaultPayrollConfig.xml`.
 
----
+## HelperProfiles Integration
 
-## Default Keybinds
+HelperProfiles is optional and is not a hard dependency.
 
-Keybinds can be changed in the Farming Simulator controls menu.
+HelperPayroll `0.4.1.1` publishes its role-assignment API globally and on the active mission so HelperProfiles can discover it reliably regardless of mod load order.
 
-| Action | Default binding | Description |
-|---|---:|---|
-| Cycle payroll role | `;` | Selects the next role in `roleType` mode. |
-| Toggle payroll role list | `RCTRL + ;` | Shows or hides the standalone role list. |
-| Toggle payroll report | `RCTRL + P` | Opens or closes the payroll report overlay. |
-| Open management screen | `RCTRL + H` | Opens the full payroll-management UI. |
+With HelperProfiles `2.0.27.2` or a compatible later build:
 
-When HelperProfiles is enabled, it owns the semicolon key family. HelperPayroll therefore suppresses its standalone role-cycle and role-list inputs for that session to prevent conflicts. The management and report shortcuts remain available.
+- HelperProfiles supplies stable helper identities and display names.
+- HelperPayroll supplies ordered role definitions and effective role mappings.
+- Roles can be assigned from the HelperProfiles Profiles screen.
+- Set payroll mode to `helperSlot` for those individual assignments to control payroll calculations; `roleType` continues to use the globally selected role.
+- The HelperProfiles overlay displays a live **ROLE** column.
+- Assignments are stored by stable identity where possible, with A–J slot fallback.
+- Worker identities and roles are included in payroll reports and ledger entries.
+- HelperPayroll remains responsible for all compensation rules and persistence.
 
----
+Changing a role while a job is already active does not retroactively alter the terms captured for that job.
 
-## Installation
-
-1. Download `FS25_HelperPayroll.zip` from the GitHub release.
-2. Place the ZIP directly in your Farming Simulator 25 mods folder:
+Check integration status with:
 
 ```text
-Documents/My Games/FarmingSimulator2025/mods
+hpayProfiles status
+hpayProfiles slots
 ```
 
-3. Do not unpack the ZIP.
-4. Launch Farming Simulator 25.
-5. Enable **Helper Payroll Beta** for the intended savegame.
-
-HelperProfiles is optional. HelperPayroll remains usable in standalone `roleType` mode when HelperProfiles is absent or does not expose the required shared API.
-
-Because this is a beta release candidate, test it on a copied save before relying on it in an important playthrough.
-
----
+HelperPayroll remains usable in standalone `roleType` mode when HelperProfiles is absent.
 
 ## Configuration and Save Data
 
 ### Global policy template
 
-On first use, HelperPayroll creates an editable global policy file at:
+On first use, HelperPayroll creates:
 
 ```text
 Documents/My Games/FarmingSimulator2025/modSettings/FS25_HelperPayroll/defaultPayrollConfig.xml
 ```
 
-This file supplies the defaults for new saves and for the **Reset Save** action.
-
-The bundled configuration inside the mod ZIP remains a fallback and template. Do not edit the copy inside the ZIP for normal configuration.
+This file provides defaults for new saves and for **Reset Save**. The bundled XML inside the mod ZIP is a fallback/template and should not normally be edited.
 
 ### Save-specific settings
 
-Each save stores its active payroll policy, role list, worker mappings, pending daily payroll and overlay settings at:
+Each save stores its effective configuration at:
 
 ```text
 Documents/My Games/FarmingSimulator2025/modSettings/FS25_HelperPayroll/savegameX/helperPayrollSettings.xml
 ```
 
-Replace `savegameX` with the relevant save slot, such as `savegame17`.
+The file contains:
 
-Save-specific values take priority over the global defaults. Editing `defaultPayrollConfig.xml` does not automatically replace an existing save's active settings.
+- Active payroll profile.
+- Payroll and billing modes.
+- Role compensation policies.
+- Worker-role mappings.
+- Worker compensation overrides.
+- Pending daily payroll.
+- Overlay and reporting settings.
 
-Use one of the following after editing XML while the game is running:
+Save-specific settings take priority over the global template. Editing `defaultPayrollConfig.xml` does not automatically replace an existing save's settings.
 
-- Select **Reload Save** in the management screen.
-- Run `hpaySave reload` in the console.
+Reload after manual XML edits with:
 
-Use **Reset Save** only when you deliberately want the current save to inherit the global policy again.
+```text
+hpaySave reload
+```
 
 ### Persistent ledger
 
@@ -194,166 +246,143 @@ Payroll history is stored under:
 Documents/My Games/FarmingSimulator2025/modSettings/FS25_HelperPayroll/savegameX/ledger
 ```
 
-The folder contains an index and period files such as:
+Typical files include:
 
 ```text
 index.xml
 Y001_M06.xml
 ```
 
-Exported text reports are written to the save-specific HelperPayroll folder.
-
----
+Exported reports are written to the current save's HelperPayroll settings folder.
 
 ## Default Roles
 
-The default public payroll profile includes:
+The bundled `default` profile contains:
 
-| Role ID | Display name | Hourly rate |
-|---|---|---:|
-| `owner` | Owner Labour | 0.00 |
-| `trainee` | Trainee Helper | 10.00 |
-| `standard` | Standard Helper | 18.00 |
-| `skilled` | Skilled Operator | 22.00 |
-| `contractor` | Contractor | 30.00 |
+| Role ID | Display name | Pay basis | Rate | Minimum call-out |
+|---|---|---|---:|---:|
+| `owner` | Owner Labour | Hourly | 0.00 | 0.00 |
+| `trainee` | Trainee Helper | Hourly | 10.00 | 5.00 |
+| `standard` | Standard Helper | Hourly | 18.00 | 5.00 |
+| `skilled` | Skilled Operator | Hourly | 22.00 | 5.00 |
+| `contractor` | Contractor | Hourly | 30.00 | 5.00 |
 
-The policy template also contains example UK tenant-farm and US ranch profiles.
+Rates use the active save's currency display and economy context.
 
-All numeric rates use the active save's currency context.
-
----
+The bundled policy also includes example `uk_tenant` and `us_ranch` profiles.
 
 ## Adding a Custom Role
 
-The current management UI can edit existing role rates but does not yet provide Add, Rename or Delete Role controls.
+The current UI can edit existing roles but does not yet add, rename, reorder, or delete role definitions.
 
-Custom roles can be added to the save-specific `helperPayrollSettings.xml` file. Add another worker entry within `<workerRates>`:
+Add custom roles to the relevant `<workerRates>` section in either the global template or the save-specific file:
 
 ```xml
-<workerRates>
-    <worker profile="default" role="seasonal" name="Seasonal Worker" hourlyRate="16.00" />
+<workerRates profile="default">
+    <worker id="seasonal"
+            name="Seasonal Worker"
+            payBasis="hourly"
+            rate="16.00"
+            minimumCallout="5.00" />
 </workerRates>
 ```
 
-The actual file will usually contain the existing roles as well. Keep those entries unless you deliberately want to remove them from that save.
+For a daily role:
 
-After saving the XML, select **Reload Save** or run:
+```xml
+<worker id="dayContractor"
+        name="Day Contractor"
+        payBasis="daily"
+        rate="240.00"
+        minimumCallout="0.00" />
+```
+
+After editing the active save file while the game is running:
 
 ```text
 hpaySave reload
 ```
 
-Version 0.3.3.1 treats the save-specific role section as authoritative for each profile it contains. Custom IDs, names and rates are loaded into the UI and preserved when **Apply** writes the save again. Familiar policy roles retain their policy order; save-only roles are appended in their XML order.
+Role IDs must be unique and non-empty. Save-specific role definitions are preserved when the management screen writes the save.
 
-If the selected or fallback role no longer exists, HelperPayroll selects a valid role from the loaded list.
-
----
-
-## Default Policy Example
-
-The following is a shortened example of the global policy structure:
+## Policy Structure Example
 
 ```xml
 <helperPayroll>
     <settings>
-        <suppressVanillaAIWorkerCosts>true</suppressVanillaAIWorkerCosts>
-        <enableCustomWorkerCosts>true</enableCustomWorkerCosts>
         <activePayrollProfile>default</activePayrollProfile>
-        <payrollMode>roleType</payrollMode>
+        <payrollMode>helperSlot</payrollMode>
         <selectedRole>standard</selectedRole>
         <fallbackRole>standard</fallbackRole>
-        <chargeCustomWorkerCosts>true</chargeCustomWorkerCosts>
-        <billingMode>onJobFinish</billingMode>
+        <billingMode>dailyPayroll</billingMode>
         <payrollHour>18</payrollHour>
-        <minimumWorkerCharge>5.00</minimumWorkerCharge>
         <workerCalloutFee>0.00</workerCalloutFee>
         <roundWorkerCharges>true</roundWorkerCharges>
     </settings>
 
-    <profiles>
-        <profile id="default" name="Default Helper Payroll" economyMultiplier="1.00" />
-    </profiles>
-
     <workerRates profile="default">
-        <worker id="owner" name="Owner Labour" hourlyRate="0" />
-        <worker id="trainee" name="Trainee Helper" hourlyRate="10" />
-        <worker id="standard" name="Standard Helper" hourlyRate="18" />
-        <worker id="skilled" name="Skilled Operator" hourlyRate="22" />
-        <worker id="contractor" name="Contractor" hourlyRate="30" />
+        <worker id="standard"
+                name="Standard Helper"
+                payBasis="hourly"
+                rate="18.00"
+                minimumCallout="5.00" />
+        <worker id="contractor"
+                name="Contractor"
+                payBasis="daily"
+                rate="250.00"
+                minimumCallout="0.00" />
     </workerRates>
+
+    <helperSlots profile="default">
+        <helper slot="A"
+                name="Helper A"
+                role="Standard Helper"
+                workerRate="standard" />
+    </helperSlots>
 </helperPayroll>
 ```
 
----
-
-## HelperProfiles Integration
-
-HelperProfiles is optional and is not a hard dependency.
-
-With a compatible API-enabled HelperProfiles build, HelperPayroll can:
-
-- Read live A–J helper identities and display names.
-- Retain mappings by stable identity where available.
-- Show selected and in-use worker information in the management UI.
-- Assign different payroll roles to individual workers.
-- Include worker identity data in payroll reports and ledger entries.
-
-In `helperSlot` mode, the detected `job.helperIndex` identifies the A–J slot. HelperProfiles supplies the live identity, and HelperPayroll applies the save-specific identity or slot mapping.
-
-If HelperProfiles is loaded without the required shared API, HelperPayroll logs the condition and remains available in standalone `roleType` mode.
-
-Check the current integration state with:
-
-```text
-hpayProfiles status
-hpayProfiles slots
-```
-
----
-
 ## Console Commands
 
-Run each main command with `help` to display its available subcommands.
+Run a main command with `help` to display available subcommands.
 
-### Role selection
+### Roles
 
 | Command | Description |
 |---|---|
-| `hpayRole status` | Displays the active profile, selected role and rate. |
-| `hpayRole list` | Lists the available roles. |
+| `hpayRole status` | Shows the active profile, selected role, basis, and rate. |
+| `hpayRole list` | Lists available roles. |
 | `hpayRole next` | Selects the next role. |
 | `hpayRole prev` | Selects the previous role. |
-| `hpayRole set <id\|index\|name>` | Selects a role immediately. |
+| `hpayRole set <id\|index\|name>` | Selects a role. |
 
-### Overlay
+### Overlays
 
 | Command | Description |
 |---|---|
-| `hpayOverlay on\|off\|toggle` | Controls the role-list overlay. |
-| `hpayOverlay status` | Displays overlay and selected-role status. |
+| `hpayOverlay on\|off\|toggle` | Controls the standalone role-list overlay. |
+| `hpayOverlay status` | Shows role-list overlay status. |
 | `hpayOverlay pos <x> <y>` | Sets normalized screen position. |
 | `hpayOverlay anchor TL\|TR\|BL\|BR` | Sets the anchor corner. |
-| `hpayOverlay scale <0.5..2.0>` | Sets overlay scale. |
-| `hpayOverlay width <0.15..0.90>` | Sets overlay width. |
+| `hpayOverlay scale <0.5..2.0>` | Sets scale. |
+| `hpayOverlay width <0.15..0.90>` | Sets width. |
 | `hpayOverlay opacity <0..1>` | Sets background opacity. |
 | `hpayOverlay font <0.010..0.030>` | Sets font size. |
 | `hpayOverlay rowgap <0.001..0.03>` | Sets row spacing. |
-| `hpayOverlay maxrows <3..30>` | Sets the maximum visible rows. |
+| `hpayOverlay maxrows <3..30>` | Sets maximum rows. |
 | `hpayOverlay pad <0..0.05>` | Sets padding. |
 | `hpayOverlay bg\|outline\|shadow on\|off` | Controls visual elements. |
-| `hpayOverlay debounce <ms>` | Sets role-selector debounce time. |
-| `hpayOverlay reset` | Restores the overlay defaults. |
 
 ### Reports and ledger
 
 | Command | Description |
 |---|---|
 | `hpayReport summary` | Prints the persistent ledger summary. |
-| `hpayReport session` | Prints the current in-memory session report. |
+| `hpayReport session` | Prints the current session report. |
 | `hpayReport jobs [limit] [period]` | Prints recent persisted entries. |
 | `hpayReport month <year> <month>` | Prints a specific monthly ledger. |
-| `hpayReport roles` | Prints persistent totals by role/helper rate. |
-| `hpayReport daily` | Prints pending in-memory daily payroll rows. |
+| `hpayReport roles` | Prints totals by role and worker rate. |
+| `hpayReport daily` | Prints pending daily payroll rows. |
 | `hpayReport export [name]` | Exports the persistent ledger summary. |
 | `hpayReport exportSession [name]` | Exports the current session report. |
 
@@ -363,27 +392,23 @@ Run each main command with `help` to display its available subcommands.
 |---|---|
 | `hpayConfig status` | Shows the global policy source and template values. |
 | `hpayConfig path` | Prints the global policy path. |
-| `hpayConfig reload` | Reloads the global policy and current save overrides. |
-| `hpayConfig reset` | Regenerates the global policy from bundled defaults. |
+| `hpayConfig reload` | Reloads global policy and save overrides. |
+| `hpayConfig reset` | Regenerates the global template from bundled defaults. |
 | `hpaySave status` | Shows the current save's effective settings. |
 | `hpaySave path` | Prints the current save settings path. |
-| `hpaySave reload` | Reloads the global policy and current save settings. |
-| `hpaySave reset` | Immediately resets the current save from the global policy. |
-| `hpayProfiles status` | Shows HelperProfiles/API integration status. |
-| `hpayProfiles slots` | Lists A–J identities and payroll mappings. |
-| `hpayDump status` | Prints the full runtime status. |
-| `hpayDump clock` | Shows the payroll clock and pending-row due state. |
+| `hpaySave reload` | Reloads global and current-save settings. |
+| `hpaySave reset` | Immediately resets the current save from the global template. |
+| `hpayProfiles status` | Shows HelperProfiles integration state. |
+| `hpayProfiles slots` | Lists identities and payroll mappings. |
+| `hpayDump status` | Prints full runtime status. |
+| `hpayDump clock` | Shows payroll-clock and due-row state. |
 | `hpayDump roles\|ledger\|report\|config` | Prints the selected diagnostic view. |
-
-> Unlike the management-screen reset, the console command `hpaySave reset` does not present a confirmation screen.
-
----
 
 ## Troubleshooting
 
-### Vanilla AI wages are still appearing
+### Vanilla AI wages still appear
 
-Check that HelperPayroll is enabled for the save and inspect:
+Run:
 
 ```text
 hpayDump status
@@ -391,23 +416,26 @@ hpayConfig status
 hpaySave status
 ```
 
-Confirm that the policy contains:
+Confirm that suppression and custom charging are enabled in the active settings.
 
-```xml
-<suppressVanillaAIWorkerCosts>true</suppressVanillaAIWorkerCosts>
-<enableCustomWorkerCosts>true</enableCustomWorkerCosts>
-<chargeCustomWorkerCosts>true</chargeCustomWorkerCosts>
-```
+### A custom role is missing
 
-### A custom role does not appear
+- Confirm it was added to the active profile.
+- Use a unique, non-empty role ID.
+- Confirm `payBasis` is `hourly` or `daily`.
+- Reload the active save settings.
+- Check `log.txt` for XML or duplicate-role warnings.
 
-- Confirm that it was added to the active save's `helperPayrollSettings.xml`, not only another save slot.
-- Confirm that its `profile` matches the active payroll profile.
-- Give the role a unique, non-empty ID.
-- Use **Reload Save** or `hpaySave reload` after editing.
-- Check `log.txt` for duplicate-role or XML warnings.
+### Daily compensation was charged unexpectedly
 
-### Daily payroll did not settle at the expected time
+Remember that compensation basis and payment schedule are separate:
+
+- A `daily` role is paid once per worker/day.
+- `dailyPayroll` only controls when completed work is settled.
+- An `hourly` role can still be settled through `dailyPayroll`.
+- A `daily` role can still be settled through `onJobFinish`.
+
+### Payroll did not settle at the configured hour
 
 Run:
 
@@ -416,76 +444,51 @@ hpayDump clock
 hpayReport daily
 ```
 
-Pending rows from an earlier game day should settle automatically, even when the configured hour was skipped through accelerated time.
+Rows from an earlier game day should be treated as overdue and settle automatically.
 
-### HelperProfiles names are unavailable
+### HelperProfiles roles are missing
 
 Run:
 
 ```text
 hpayProfiles status
+hpayProfiles slots
 ```
 
-If HelperProfiles is detected but the API is unavailable, update to an API-enabled HelperProfiles build. HelperPayroll will continue to work in standalone `roleType` mode.
-
-### The semicolon controls do not work
-
-When HelperProfiles is enabled, it intentionally owns the semicolon controls. Use the management screen or `hpayRole` console commands for payroll changes.
-
-Also check the Farming Simulator controls menu for local keybind overrides or conflicts.
+Confirm that HelperProfiles `2.0.27.2` or a compatible later build is enabled, only one copy of each mod ZIP exists, the game was restarted after replacing either mod, and the HelperPayroll API publication appears in `log.txt`.
 
 ### Requesting support
 
-Include:
+Include the HelperPayroll version, HelperProfiles version when installed, relevant `log.txt` excerpt, savegame number, active modes, and clear reproduction steps.
 
-- HelperPayroll version.
-- Relevant `log.txt` excerpt.
-- Savegame number.
-- Active payroll and billing modes.
-- Whether HelperProfiles is enabled.
-- Clear steps to reproduce the issue.
+## Version 0.4.1.1 Alpha 2
 
----
+- Publishes the role-assignment API globally and on the active mission.
+- Allows HelperProfiles to discover the API reliably regardless of load order.
+- Supplies ordered role definitions and effective identity/slot mappings.
+- Accepts validated save-specific role changes through `setWorkerRole`.
+- Retains hourly and daily role policies.
+- Retains inherited or custom per-worker compensation.
+- Preserves active-job compensation capture and persistent ledger behaviour.
 
-## Version 0.3.3.1
+## Development Status
 
-This maintenance build fixes two management-screen and persistence issues found in 0.3.3.0:
+This is an alpha integration build.
 
-- **Reload Save** and **Reset Save** no longer share the same `X` action.
-- Reset now requires a second confirmation action in the management screen.
-- Save-specific roles no longer need to exist in the global policy before they can be loaded.
-- Custom role IDs, display names and rates are preserved when the UI writes the save.
-- Save-only roles retain their relative XML order after the known policy roles.
-- Invalid selected or fallback roles are safely reassigned after a role-list change.
+Planned work includes:
 
-The finished ZIP was also checked for valid Lua syntax, valid XML and correct top-level FS25 packaging.
-
----
-
-## Planned Development
-
-The current roadmap includes:
-
-- Per-role and per-worker minimum call-out settings.
-- A per-role or per-worker choice between hourly and daily pay.
-- Worker-specific overrides that can inherit from role defaults.
-- Separate worked-day and rostered-day daily-pay policies.
-- Add, rename and delete role controls in the management UI.
-- Continued improvement of payroll reporting and HelperProfiles integration.
-
-These items are planned directions and are not yet included in version 0.3.3.1.
-
----
+- Add, rename, reorder, and delete role controls in the management UI.
+- Expanded helper-roster support beyond A–J in coordination with HelperProfiles.
+- Optional rostered-day policies distinct from worked-day daily compensation.
+- Continued reporting, localisation, and usability improvements.
 
 ## Permissions
 
-Copyright © SimGamerJen. All rights reserved.
+Copyright © 2026 SimGamerJen. All rights reserved.
 
-**Editing, redistributing, or publishing modified versions of this mod is prohibited without prior written permission from the mod author.**
+Editing, redistributing, re-uploading, repackaging, or publishing modified versions of this mod is prohibited without prior written permission from SimGamerJen.
 
-The presence of source files in this repository does not grant permission to republish, repackage, redistribute or release modified versions of the mod.
-
----
+The presence of source files in this repository does not grant permission to publish or redistribute derivative versions.
 
 ## Disclaimer
 
