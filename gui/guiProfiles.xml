@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="utf-8" standalone="no" ?>
+<GUIProfiles>
+    <Profile name="hpayColumnHeader" extends="baseReference" with="anchorTopLeft">
+        <imageColor value="0 0 0 0"/>
+        <textSize value="13px"/>
+        <textBold value="true"/>
+        <textUpperCase value="true"/>
+        <textColor value="$preset_colorWhite_50"/>
+        <textAlignment value="center"/>
+        <textVerticalAlignment value="middle"/>
+    </Profile>
+
+    <Profile name="hpayList" extends="emptyPanel" with="pivotTopLeft">
+        <size value="1060px 493px"/>
+    </Profile>
+
+    <Profile name="hpayListItem" extends="fs25_calendarListItem">
+        <height value="34px"/>
+        <imageColor value="$preset_fs25_colorGrey"/>
+        <imageSelectedColor value="$preset_fs25_colorMainHighlight"/>
+        <alternateBackgroundColor value="$preset_fs25_colorGreyDark_50"/>
+    </Profile>
+
+    <Profile name="hpayListItemGradient" extends="fs25_calendarListItemBg">
+        <imageSelectedColor value="$preset_fs25_colorMainHighlight"/>
+        <startImageSelectedColor value="$preset_fs25_colorMainHighlight"/>
+        <endImageSelectedColor value="$preset_fs25_colorMainHighlight"/>
+    </Profile>
+
+    <Profile name="hpayRowCellLeft" extends="baseReference" with="anchorStretchingYLeft">
+        <textBold value="false"/>
+        <textSize value="14px"/>
+        <textAlignment value="left"/>
+        <textVerticalAlignment value="middle"/>
+        <textColor value="$preset_fs25_colorMainLight"/>
+        <textSelectedColor value="$preset_fs25_colorMainDark"/>
+        <textDisabledColor value="$preset_colorDisabled"/>
+    </Profile>
+
+    <Profile name="hpayRowCellCenter" extends="hpayRowCellLeft">
+        <textAlignment value="center"/>
+        <textBold value="true"/>
+    </Profile>
+
+    <Profile name="hpayRowCellRight" extends="hpayRowCellLeft">
+        <textAlignment value="right"/>
+        <textBold value="true"/>
+    </Profile>
+
+    <Profile name="hpaySliderBox" extends="fs25_listSliderBox" with="anchorTopRight">
+        <width value="6px"/>
+        <height value="493px"/>
+    </Profile>
+
+    <Profile name="hpayDetailsHeader" extends="baseReference" with="anchorTopLeft">
+        <textSize value="14px"/>
+        <textBold value="true"/>
+        <textUpperCase value="true"/>
+        <textColor value="$preset_colorWhite_50"/>
+        <textAlignment value="left"/>
+        <textVerticalAlignment value="middle"/>
+    </Profile>
+
+    <Profile name="hpayDetailsTitle" extends="baseReference" with="anchorTopLeft">
+        <textSize value="20px"/>
+        <textBold value="true"/>
+        <textUpperCase value="true"/>
+        <textColor value="$preset_fs25_colorMainLight"/>
+        <textAlignment value="left"/>
+        <textVerticalAlignment value="middle"/>
+    </Profile>
+
+    <Profile name="hpayDetailsLabel" extends="baseReference" with="anchorTopLeft">
+        <textSize value="14px"/>
+        <textBold value="false"/>
+        <textColor value="$preset_colorWhite_50"/>
+        <textAlignment value="left"/>
+        <textVerticalAlignment value="middle"/>
+    </Profile>
+
+    <Profile name="hpayDetailsValue" extends="baseReference" with="anchorTopLeft">
+        <textSize value="14px"/>
+        <textBold value="true"/>
+        <textColor value="$preset_fs25_colorMainLight"/>
+        <textAlignment value="right"/>
+        <textVerticalAlignment value="middle"/>
+    </Profile>
+
+    <Profile name="hpayDetailsInfo" extends="baseReference" with="anchorTopLeft">
+        <textSize value="14px"/>
+        <textBold value="false"/>
+        <textColor value="0.72 0.76 0.68 1"/>
+        <textAlignment value="left"/>
+        <textVerticalAlignment value="top"/>
+        <textMaxNumLines value="7"/>
+    </Profile>
+
+    <Profile name="hpayDetailsDirty" extends="hpayDetailsInfo">
+        <textColor value="$preset_fs25_colorMainHighlight"/>
+        <textBold value="true"/>
+        <textMaxNumLines value="3"/>
+    </Profile>
+
+    <Profile name="hpayEditButton" extends="buttonBase" with="anchorTopLeft">
+        <size value="84px 28px"/>
+        <textSize value="13px"/>
+        <textBold value="true"/>
+        <textUpperCase value="true"/>
+        <textColor value="$preset_fs25_colorMainLight"/>
+        <textFocusedColor value="$preset_fs25_colorMainLight"/>
+        <textHighlightedColor value="$preset_fs25_colorMainLight"/>
+        <textPressedColor value="$preset_fs25_colorMainLight"/>
+        <textDisabledColor value="$preset_colorDisabled"/>
+        <textAlignment value="center"/>
+        <textVerticalAlignment value="middle"/>
+        <imageSliceId value="gui.empty"/>
+        <imageColor value="0 0 0 0"/>
+        <imageFocusedColor value="$preset_fs25_colorMainHighlight"/>
+        <imageHighlightedColor value="$preset_fs25_colorMainHighlight"/>
+        <imagePressedColor value="$preset_fs25_colorMainHighlight"/>
+        <imageDisabledColor value="0.08 0.09 0.08 0.30"/>
+        <clickSound value="DEFAULT_CLICK"/>
+        <sendActionOnRelease value="true"/>
+    </Profile>
+
+    <Profile name="hpayEditButtonWide" extends="hpayEditButton">
+        <size value="180px 28px"/>
+    </Profile>
+
+    <Profile name="hpaySelectorOption" extends="fs25_multiTextOption" with="anchorTopLeft">
+        <size value="180px 28px"/>
+        <focusOnHighlight value="true"/>
+        <wrap value="false"/>
+        <hideButtonOnLimitReached value="true"/>
+    </Profile>
+
+
+
+    <Profile name="hpayListWide" extends="hpayList">
+        <size value="1465px 430px"/>
+    </Profile>
+
+    <Profile name="hpaySliderBoxTall" extends="hpaySliderBox">
+        <height value="430px"/>
+    </Profile>
+
+    <Profile name="hpayRowCellValue" extends="hpayRowCellRight">
+        <textAlignment value="center"/>
+        <textBold value="true"/>
+    </Profile>
+
+    <Profile name="hpayInlineAdjustButton" extends="hpayEditButton">
+        <size value="38px 30px"/>
+        <textSize value="15px"/>
+        <imageColor value="0.08 0.09 0.08 0.64"/>
+        <imageFocusedColor value="$preset_fs25_colorMainHighlight"/>
+        <imageHighlightedColor value="$preset_fs25_colorMainHighlight"/>
+        <imagePressedColor value="$preset_fs25_colorMainHighlight"/>
+    </Profile>
+
+    <Profile name="hpayActionButton" extends="buttonBase" with="anchorTopLeft">
+        <size value="190px 36px"/>
+        <textSize value="14px"/>
+        <textBold value="true"/>
+        <textUpperCase value="true"/>
+        <textColor value="$preset_fs25_colorMainLight"/>
+        <textFocusedColor value="$preset_fs25_colorMainLight"/>
+        <textHighlightedColor value="$preset_fs25_colorMainLight"/>
+        <textPressedColor value="$preset_fs25_colorMainLight"/>
+        <textDisabledColor value="$preset_colorDisabled"/>
+        <textAlignment value="center"/>
+        <textVerticalAlignment value="middle"/>
+        <imageSliceId value="gui.empty"/>
+        <imageColor value="0.08 0.09 0.08 0.88"/>
+        <imageFocusedColor value="0.68 0.96 0.08 0.30"/>
+        <imageHighlightedColor value="0.68 0.96 0.08 0.30"/>
+        <imagePressedColor value="0.68 0.96 0.08 0.42"/>
+        <imageDisabledColor value="0.08 0.09 0.08 0.30"/>
+        <clickSound value="DEFAULT_CLICK"/>
+        <sendActionOnRelease value="true"/>
+    </Profile>
+</GUIProfiles>

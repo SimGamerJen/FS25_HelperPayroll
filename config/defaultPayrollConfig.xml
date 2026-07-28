@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8"?>
+<helperPayroll>
+    <settings>
+        <debug>true</debug>
+        <suppressVanillaAIWorkerCosts>true</suppressVanillaAIWorkerCosts>
+        <enableCustomWorkerCosts>true</enableCustomWorkerCosts>
+
+        <!-- Public/default profile. This mod uses the savegame's own money display settings. -->
+        <activePayrollProfile>default</activePayrollProfile>
+
+        <!--
+            roleType  = vanilla-friendly mode; all AI jobs use selectedRole for payroll.
+            helperSlot = advanced/roleplay mode; detected vanilla helper slot A-J resolves to helperSlots below.
+        -->
+        <payrollMode>roleType</payrollMode>
+        <selectedRole>standard</selectedRole>
+        <fallbackRole>standard</fallbackRole>
+
+        <!-- Optional fallback only. Leave blank unless you deliberately want every job assigned to one slot. -->
+        <defaultHelperSlot></defaultHelperSlot>
+
+        <chargeCustomWorkerCosts>true</chargeCustomWorkerCosts>
+        <billingMode>onJobFinish</billingMode>
+        <payrollHour>18</payrollHour>
+        <minimumWorkerCharge>5.00</minimumWorkerCharge>
+        <workerCalloutFee>0.00</workerCalloutFee>
+        <roundWorkerCharges>true</roundWorkerCharges>
+        <roleSelectorDebounceMs>450</roleSelectorDebounceMs>
+        <logLevel>normal</logLevel>
+        <debugAllMoneyTransactions>false</debugAllMoneyTransactions>
+        <helperProfilesDiagnostics>false</helperProfilesDiagnostics>
+        <helperProfilesDiagnosticLimit>12</helperProfilesDiagnosticLimit>
+    </settings>
+
+    <profiles>
+        <profile id="default" name="Default Helper Payroll" economyMultiplier="1.00" />
+        <profile id="uk_tenant" name="UK Tenant Farm Example" economyMultiplier="1.00" />
+        <profile id="us_ranch" name="US Ranch Example" economyMultiplier="1.00" />
+    </profiles>
+
+    <workerRates profile="default">
+        <worker id="owner" name="Owner Labour" payBasis="hourly" rate="0" minimumCallout="0" />
+        <worker id="trainee" name="Trainee Helper" payBasis="hourly" rate="10" minimumCallout="5" />
+        <worker id="standard" name="Standard Helper" payBasis="hourly" rate="18" minimumCallout="5" />
+        <worker id="skilled" name="Skilled Operator" payBasis="hourly" rate="22" minimumCallout="5" />
+        <worker id="contractor" name="Contractor" payBasis="hourly" rate="30" minimumCallout="5" />
+    </workerRates>
+
+    <workerRates profile="uk_tenant">
+        <worker id="owner" name="Owner Labour" payBasis="hourly" rate="0" minimumCallout="0" />
+        <worker id="trainee" name="Trainee Helper" payBasis="hourly" rate="10" minimumCallout="5" />
+        <worker id="standard" name="General Farmhand" payBasis="hourly" rate="14" minimumCallout="5" />
+        <worker id="skilled" name="Skilled Operator" payBasis="hourly" rate="18" minimumCallout="5" />
+        <worker id="manager" name="Farm Manager" payBasis="hourly" rate="24" minimumCallout="5" />
+        <worker id="contractor" name="External Contractor" payBasis="hourly" rate="28" minimumCallout="5" />
+    </workerRates>
+
+    <workerRates profile="us_ranch">
+        <worker id="owner" name="Owner Labour" payBasis="hourly" rate="0" minimumCallout="0" />
+        <worker id="trainee" name="Trainee Ranch Hand" payBasis="hourly" rate="14" minimumCallout="5" />
+        <worker id="standard" name="Ranch Hand" payBasis="hourly" rate="18" minimumCallout="5" />
+        <worker id="skilled" name="Skilled Operator" payBasis="hourly" rate="24" minimumCallout="5" />
+        <worker id="manager" name="Ranch Manager" payBasis="hourly" rate="30" minimumCallout="5" />
+        <worker id="contractor" name="External Contractor" payBasis="hourly" rate="35" minimumCallout="5" />
+    </workerRates>
+
+    <!-- Advanced mode only: used when payrollMode="helperSlot". -->
+    <helperSlots profile="default">
+        <helper slot="A" name="Helper A" role="Standard Helper" workerRate="standard" />
+        <helper slot="B" name="Helper B" role="Standard Helper" workerRate="standard" />
+        <helper slot="C" name="Helper C" role="Standard Helper" workerRate="standard" />
+        <helper slot="D" name="Helper D" role="Standard Helper" workerRate="standard" />
+        <helper slot="E" name="Helper E" role="Standard Helper" workerRate="standard" />
+        <helper slot="F" name="Helper F" role="Standard Helper" workerRate="standard" />
+        <helper slot="G" name="Helper G" role="Standard Helper" workerRate="standard" />
+        <helper slot="H" name="Helper H" role="Standard Helper" workerRate="standard" />
+        <helper slot="I" name="Helper I" role="Standard Helper" workerRate="standard" />
+        <helper slot="J" name="Helper J" role="Standard Helper" workerRate="standard" />
+    </helperSlots>
+
+    <!-- Example roleplay setup for use with HelperProfiles-style helper slot identities. -->
+    <helperSlots profile="uk_tenant">
+        <helper slot="A" name="Marty" role="Farm Manager" workerRate="manager" />
+        <helper slot="B" name="Rhys" role="Skilled Operator" workerRate="skilled" />
+        <helper slot="C" name="Ellie" role="General Farmhand" workerRate="standard" />
+        <helper slot="D" name="Graham" role="Contractor" workerRate="contractor" />
+    </helperSlots>
+
+    <helperSlots profile="us_ranch">
+        <helper slot="A" name="Riley" role="Skilled Operator" workerRate="skilled" />
+        <helper slot="B" name="Jed" role="Neighbour / Mates Rate" workerRate="standard" />
+        <helper slot="C" name="Miguel" role="Ranch Hand" workerRate="standard" />
+        <helper slot="D" name="External Contractor" role="Contractor" workerRate="contractor" />
+    </helperSlots>
+</helperPayroll>
