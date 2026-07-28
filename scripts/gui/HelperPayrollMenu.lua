@@ -39,8 +39,9 @@ function HelperPayrollMenu.new(target, customMt)
     self.selectedRowIndex = nil
     self.selectedRow = nil
     self.draftSettings = {}
-    self.draftRates = {}
+    self.draftRolePolicies = {}
     self.draftMappings = {}
+    self.draftWorkerOverrides = {}
     self.stagedDirty = false
     self.suppressTabCallback = false
     self.suppressOptionCallback = false
@@ -146,8 +147,9 @@ end
 function HelperPayrollMenu:refreshDraftFromRuntime()
     local hp = HelperPayroll
     self.draftSettings = {}
-    self.draftRates = {}
+    self.draftRolePolicies = {}
     self.draftMappings = {}
+    self.draftWorkerOverrides = {}
     if hp ~= nil and hp.settings ~= nil then
         self.draftSettings.billingMode = hp.settings.billingMode or "onJobFinish"
         self.draftSettings.payrollHour = tonumber(hp.settings.payrollHour) or 18
@@ -162,7 +164,13 @@ function HelperPayrollMenu:refreshDraftFromRuntime()
     local profileId = self.draftSettings.activePayrollProfile or "default"
     if hp ~= nil and hp.workerRates ~= nil and hp.workerRates[profileId] ~= nil then
         for roleId, worker in pairs(hp.workerRates[profileId]) do
-            self.draftRates[roleId] = tonumber(worker.hourlyRate) or 0
+            local rate = tonumber(worker.rate)
+            if rate == nil then rate = tonumber(worker.hourlyRate) or 0 end
+            self.draftRolePolicies[roleId] = {
+                payBasis = hp.normalisePayBasis ~= nil and hp:normalisePayBasis(worker.payBasis) or "hourly",
+                rate = rate,
+                minimumCallout = tonumber(worker.minimumCallout) or tonumber(hp.settings.minimumWorkerCharge) or 0
+            }
         end
     end
     if hp ~= nil then
@@ -171,6 +179,14 @@ function HelperPayrollMenu:refreshDraftFromRuntime()
             local slotInfo = hp.getHelperProfilesSlotInfo ~= nil and hp:getHelperProfilesSlotInfo(slot) or nil
             local roleId = hp.getEffectiveHelperProfilesRole ~= nil and select(1, hp:getEffectiveHelperProfilesRole(slotInfo, slot, profileId)) or (hp.settings.fallbackRole or "standard")
             self.draftMappings[slot] = roleId
+            local mapping = hp.getHelperProfilesPayrollMapping ~= nil and select(1, hp:getHelperProfilesPayrollMapping(slotInfo, slot)) or nil
+            local rolePolicy = self.draftRolePolicies[roleId] or {payBasis="hourly", rate=0, minimumCallout=0}
+            self.draftWorkerOverrides[slot] = {
+                compensationMode = mapping ~= nil and tostring(mapping.compensationMode or "inherit") or "inherit",
+                payBasis = mapping ~= nil and (hp:normalisePayBasis(mapping.payBasis)) or rolePolicy.payBasis,
+                rate = mapping ~= nil and tonumber(mapping.rate) or rolePolicy.rate,
+                minimumCallout = mapping ~= nil and tonumber(mapping.minimumCallout) or rolePolicy.minimumCallout
+            }
         end
     end
     self.stagedDirty = false
@@ -241,7 +257,7 @@ function HelperPayrollMenu:buildRows()
             {id="payrollMode", label="Payroll mode", value=tostring(self.draftSettings.payrollMode or "roleType"), status="Editable", source="Savegame", editType="option", options={"roleType", "helperSlot"}, info="roleType assigns every new job to the selected payroll role. helperSlot uses the deployed A-J worker, with live HelperProfiles identity data when available."},
             {id="billingMode", label="Billing mode", value=tostring(self.draftSettings.billingMode or "onJobFinish"), status="Editable", source="Savegame", editType="option", options={"onJobFinish", "dailyPayroll"}, info="onJobFinish charges each completed job immediately. dailyPayroll aggregates each worker's completed work for the game day and settles it through payroll."},
             {id="payrollHour", label="Payroll hour", value=fmtHour(self.draftSettings.payrollHour), status="Editable", source="Savegame", editType="number", step=1, min=0, max=23, info="In dailyPayroll mode, pending rows settle at this in-game hour. Any unpaid row from an earlier game day is treated as overdue and settles automatically."},
-            {id="minimumWorkerCharge", label="Minimum charge", value=fmtMoney(self.draftSettings.minimumWorkerCharge), status="Editable", source="Savegame", editType="number", step=0.5, min=0, max=999, info="Minimum charge after labour and callout: per job in onJobFinish mode, or once per worker and workday in dailyPayroll mode."},
+            {id="minimumWorkerCharge", label="Legacy minimum", value=fmtMoney(self.draftSettings.minimumWorkerCharge), status="Editable", source="Savegame", editType="number", step=0.5, min=0, max=999, info="Compatibility fallback for old save data that has no per-role minimum. New payroll policies use the minimum call-out configured on each role or worker."},
             {id="workerCalloutFee", label="Callout fee", value=fmtMoney(self.draftSettings.workerCalloutFee), status="Editable", source="Savegame", editType="number", step=0.5, min=0, max=999, info="Flat callout fee: per job in onJobFinish mode, or once per worker and workday in dailyPayroll mode."},
             {id="roundWorkerCharges", label="Round charges", value=boolText(self.draftSettings.roundWorkerCharges), status="Editable", source="Savegame", editType="option", options={"false", "true"}, info="Round applied helper charges to the nearest currency cent."},
         }
@@ -250,9 +266,11 @@ function HelperPayrollMenu:buildRows()
         for _, roleId in ipairs(order or {}) do
             local worker = hp:getWorkerRateById(profileId, roleId)
             local name = worker ~= nil and worker.name or roleId
-            local rate = self.draftRates[roleId]
-            if rate == nil and worker ~= nil then rate = tonumber(worker.hourlyRate) or 0 end
-            table.insert(rows, {id="rate:"..tostring(roleId), roleId=roleId, label=tostring(name), value=fmtMoney(rate).."/hr", status=(roleId == self.draftSettings.selectedRole and "Selected" or "Editable"), source=tostring(profileId), editType="number", step=1, min=0, max=999, info="Hourly rate for worker role '"..tostring(roleId).."'."})
+            local policy = self.draftRolePolicies[roleId] or {payBasis="hourly", rate=0, minimumCallout=0}
+            local prefix = tostring(name) .. " - "
+            table.insert(rows, {id="roleBasis:"..tostring(roleId), roleId=roleId, roleField="payBasis", label=prefix.."Pay basis", status=(roleId == self.draftSettings.selectedRole and "Selected" or "Editable"), source=tostring(profileId), editType="option", options={"hourly", "daily"}, info="Choose whether this role is paid by worked hour or once per worker per game day when used."})
+            table.insert(rows, {id="roleRate:"..tostring(roleId), roleId=roleId, roleField="rate", label=prefix.."Rate", status="Editable", source=tostring(profileId), editType="number", step=1, min=0, max=999999, info="The amount paid per hour or per used game day, according to this role's pay basis."})
+            table.insert(rows, {id="roleMinimum:"..tostring(roleId), roleId=roleId, roleField="minimumCallout", label=prefix.."Minimum call-out", status=policy.payBasis == "daily" and "Ignored for daily" or "Editable", source=tostring(profileId), editType="number", step=1, min=0, max=999999, info="Hourly roles are charged at least this amount whenever used. Daily roles ignore this setting."})
         end
     elseif topic == "workers" then
         local roleOrder = hp ~= nil and hp.getWorkerRateOrder ~= nil and hp:getWorkerRateOrder(profileId) or {}
@@ -269,21 +287,25 @@ function HelperPayrollMenu:buildRows()
             local inUse = slotInfo ~= nil and slotInfo.inUse == true
             local status = selected and "Selected" or (inUse and "In use" or "Idle")
             local roleId = self.draftMappings[slot] or tostring(hp ~= nil and hp.settings ~= nil and hp.settings.fallbackRole or "standard")
-            local worker = hp ~= nil and hp.getWorkerRateById ~= nil and hp:getWorkerRateById(profileId, roleId) or nil
-            local roleName = worker ~= nil and worker.name or roleId
-            local rate = worker ~= nil and tonumber(worker.hourlyRate) or 0
+            local rolePolicy = self.draftRolePolicies[roleId] or {payBasis="hourly", rate=0, minimumCallout=0}
+            local override = self.draftWorkerOverrides[slot] or {compensationMode="inherit", payBasis=rolePolicy.payBasis, rate=rolePolicy.rate, minimumCallout=rolePolicy.minimumCallout}
+            local custom = tostring(override.compensationMode) == "custom"
+            local prefix = string.format("%s - %s - ", slot, tostring(displayName))
             table.insert(rows, {
                 id="worker:" .. slot,
                 mappingSlot=slot,
                 identityId=identityId,
-                label=string.format("%s - %s", slot, tostring(displayName)),
-                value=string.format("%s (%.2f/hr)", tostring(roleName), tonumber(rate) or 0),
+                label=prefix.."Role",
                 status=status,
                 source=slotInfo ~= nil and "HelperProfiles API" or "Slot fallback",
                 editType="option",
                 options=roleOrder,
                 info=string.format("Identity: %s | Identity source: %s | Assign a HelperPayroll role to this worker. Mappings are stored in the current save.", tostring(identityId), tostring(identitySource))
             })
+            table.insert(rows, {id="workerMode:"..slot, workerSlot=slot, workerOverrideField="compensationMode", label=prefix.."Pay settings", status=custom and "Custom" or "Inherited", source="Savegame", editType="option", options={"inherit", "custom"}, info="Inherit uses the assigned role policy. Custom enables this worker's own pay basis, rate, and minimum call-out."})
+            table.insert(rows, {id="workerBasis:"..slot, workerSlot=slot, workerOverrideField="payBasis", label=prefix.."Pay basis", status=custom and "Editable" or "Inherited", source=custom and "Worker override" or "Role", editType=custom and "option" or nil, options={"hourly", "daily"}, info="Hourly pays for worked time. Daily pays this worker once per game day when used."})
+            table.insert(rows, {id="workerRate:"..slot, workerSlot=slot, workerOverrideField="rate", label=prefix.."Rate", status=custom and "Editable" or "Inherited", source=custom and "Worker override" or "Role", editType=custom and "number" or nil, step=1, min=0, max=999999, info="The worker's custom hourly or daily rate. Switch Pay settings to custom to edit it."})
+            table.insert(rows, {id="workerMinimum:"..slot, workerSlot=slot, workerOverrideField="minimumCallout", label=prefix.."Minimum call-out", status=not custom and "Inherited" or (override.payBasis == "daily" and "Ignored for daily" or "Editable"), source=custom and "Worker override" or "Role", editType=custom and "number" or nil, step=1, min=0, max=999999, info="Custom minimum for hourly work. Daily pay ignores this setting."})
         end
     elseif topic == "ledger" then
         local index = hp ~= nil and hp.ledger ~= nil and hp.ledger.index or nil
@@ -320,9 +342,15 @@ function HelperPayrollMenu:buildBodyText()
             integration = "Loaded (API unavailable)"
         end
         local pendingRows = hp ~= nil and hp.countPendingDailyPayrollRows ~= nil and hp:countPendingDailyPayrollRows() or 0
-        return string.format("Profile: %s\nPayroll mode: %s\nBilling mode: %s\nSelected role: %s (%.2f/hr)\nMinimum charge: %.2f\nCallout fee: %.2f\nHelperProfiles: %s\nPending payroll rows: %d\nCurrent-save settings: %s\n\nUse BILLING for payroll policy, ROLES for rates, WORKERS for named-worker mappings, and LEDGER for accumulated history.", tostring(hp and hp.settings and hp.settings.activePayrollProfile or "-"), tostring(hp and hp.settings and hp.settings.payrollMode or "-"), tostring(hp and hp.settings and hp.settings.billingMode or "-"), tostring(roleName), tonumber(rate) or 0, tonumber(hp and hp.settings and hp.settings.minimumWorkerCharge or 0) or 0, tonumber(hp and hp.settings and hp.settings.workerCalloutFee or 0) or 0, tostring(integration), tonumber(pendingRows) or 0, tostring(hp and hp.persistence and hp.persistence.filePath or "-"))
+        local roleBasis = "hourly"
+        if hp ~= nil and hp.getRoleCompensationPolicy ~= nil then
+            local roleId = hp.settings ~= nil and hp.settings.selectedRole or "standard"
+            local policy = hp:getRoleCompensationPolicy(hp.settings.activePayrollProfile, roleId)
+            if policy ~= nil then roleBasis = policy.payBasis or roleBasis end
+        end
+        return string.format("Profile: %s\nPayroll mode: %s\nPayment schedule: %s\nSelected role: %s (%.2f/%s)\nGlobal callout fee: %.2f\nHelperProfiles: %s\nPending payroll rows: %d\nCurrent-save settings: %s\n\nUse BILLING for payment timing, ROLES for default compensation, WORKERS for named-worker overrides, and LEDGER for accumulated history.", tostring(hp and hp.settings and hp.settings.activePayrollProfile or "-"), tostring(hp and hp.settings and hp.settings.payrollMode or "-"), tostring(hp and hp.settings and hp.settings.billingMode or "-"), tostring(roleName), tonumber(rate) or 0, roleBasis == "daily" and "day" or "hr", tonumber(hp and hp.settings and hp.settings.workerCalloutFee or 0) or 0, tostring(integration), tonumber(pendingRows) or 0, tostring(hp and hp.persistence and hp.persistence.filePath or "-"))
     elseif topic == "help" then
-        return "HelperPayroll Management\n\nChanges are staged until APPLY is pressed. APPLY writes gameplay settings to the current save only; it does not overwrite the global default policy. DISCARD restores the currently loaded values.\n\nroleType is the standalone mode and uses the selected payroll role. helperSlot uses the deployed A-J worker and can consume live HelperProfiles identity data without creating a required dependency.\n\nDaily payroll aggregates completed work by worker and game day. Pending rows persist across reloads and settle at the configured payroll hour or when they become overdue."
+        return "HelperPayroll Management\n\nChanges are staged until APPLY is pressed. APPLY writes gameplay settings to the current save only; it does not overwrite the global default policy. DISCARD restores the currently loaded values.\n\nROLES defines the default pay basis, rate, and hourly minimum call-out. WORKERS can inherit those settings or override all three for a named A-J worker.\n\nHourly pay is hours multiplied by rate, subject to the minimum call-out. Daily pay is charged once per worker per game day when that worker completes work. Payment schedule is separate: onJobFinish settles immediately, while dailyPayroll settles at the configured payroll hour."
     end
     return ""
 end
@@ -394,7 +422,19 @@ function HelperPayrollMenu:getDraftValue(row)
     if row.id == "workerCalloutFee" then return self.draftSettings.workerCalloutFee end
     if row.id == "roundWorkerCharges" then return self.draftSettings.roundWorkerCharges end
     if row.mappingSlot ~= nil then return self.draftMappings[row.mappingSlot] end
-    if row.roleId ~= nil then return self.draftRates[row.roleId] end
+    if row.roleId ~= nil and row.roleField ~= nil then
+        local policy = self.draftRolePolicies[row.roleId] or {}
+        return policy[row.roleField]
+    end
+    if row.workerSlot ~= nil and row.workerOverrideField ~= nil then
+        local override = self.draftWorkerOverrides[row.workerSlot] or {}
+        if tostring(override.compensationMode or "inherit") ~= "custom" and row.workerOverrideField ~= "compensationMode" then
+            local roleId = self.draftMappings[row.workerSlot]
+            local policy = self.draftRolePolicies[roleId] or {}
+            return policy[row.workerOverrideField]
+        end
+        return override[row.workerOverrideField]
+    end
     return row.value
 end
 
@@ -407,10 +447,15 @@ function HelperPayrollMenu:formatDraftValue(row)
         local profileId = self.draftSettings.activePayrollProfile or "default"
         local worker = HelperPayroll ~= nil and HelperPayroll.getWorkerRateById ~= nil and HelperPayroll:getWorkerRateById(profileId, tostring(v or "")) or nil
         local roleName = worker ~= nil and worker.name or tostring(v or "-")
-        local rate = worker ~= nil and tonumber(worker.hourlyRate) or 0
-        return string.format("%s (%.2f/hr)", tostring(roleName), tonumber(rate) or 0)
+        local policy = self.draftRolePolicies[tostring(v or "")] or {}
+        local rate = tonumber(policy.rate) or 0
+        return string.format("%s (%.2f/%s)", tostring(roleName), rate, policy.payBasis == "daily" and "day" or "hr")
     end
-    if row.id == "minimumWorkerCharge" or row.id == "workerCalloutFee" or row.roleId ~= nil then return fmtMoney(v) .. (row.roleId ~= nil and "/hr" or "") end
+    if row.roleField == "rate" or row.workerOverrideField == "rate" then
+        local basis = row.roleId ~= nil and (self.draftRolePolicies[row.roleId] or {}).payBasis or self:getDraftValue({workerSlot=row.workerSlot, workerOverrideField="payBasis"})
+        return fmtMoney(v) .. (basis == "daily" and "/day" or "/hr")
+    end
+    if row.id == "minimumWorkerCharge" or row.id == "workerCalloutFee" or row.roleField == "minimumCallout" or row.workerOverrideField == "minimumCallout" then return fmtMoney(v) end
     return tostring(v or "-")
 end
 
@@ -454,8 +499,32 @@ function HelperPayrollMenu:setDraftValue(row, value)
     elseif row.id == "minimumWorkerCharge" then self.draftSettings.minimumWorkerCharge = tonumber(value) or 0
     elseif row.id == "workerCalloutFee" then self.draftSettings.workerCalloutFee = tonumber(value) or 0
     elseif row.id == "roundWorkerCharges" then self.draftSettings.roundWorkerCharges = (value == true or tostring(value) == "true")
-    elseif row.mappingSlot ~= nil then self.draftMappings[row.mappingSlot] = tostring(value or "standard")
-    elseif row.roleId ~= nil then self.draftRates[row.roleId] = tonumber(value) or 0 end
+    elseif row.mappingSlot ~= nil then
+        self.draftMappings[row.mappingSlot] = tostring(value or "standard")
+        local rolePolicy = self.draftRolePolicies[self.draftMappings[row.mappingSlot]] or {}
+        local override = self.draftWorkerOverrides[row.mappingSlot] or {compensationMode="inherit"}
+        if tostring(override.compensationMode or "inherit") ~= "custom" then
+            override.payBasis = rolePolicy.payBasis
+            override.rate = rolePolicy.rate
+            override.minimumCallout = rolePolicy.minimumCallout
+        end
+        self.draftWorkerOverrides[row.mappingSlot] = override
+    elseif row.roleId ~= nil and row.roleField ~= nil then
+        local policy = self.draftRolePolicies[row.roleId] or {}
+        policy[row.roleField] = row.roleField == "payBasis" and tostring(value) or (tonumber(value) or 0)
+        self.draftRolePolicies[row.roleId] = policy
+    elseif row.workerSlot ~= nil and row.workerOverrideField ~= nil then
+        local override = self.draftWorkerOverrides[row.workerSlot] or {}
+        local field = row.workerOverrideField
+        override[field] = (field == "compensationMode" or field == "payBasis") and tostring(value) or (tonumber(value) or 0)
+        if field == "compensationMode" and tostring(value) == "custom" then
+            local rolePolicy = self.draftRolePolicies[self.draftMappings[row.workerSlot]] or {}
+            override.payBasis = rolePolicy.payBasis or "hourly"
+            override.rate = tonumber(rolePolicy.rate) or 0
+            override.minimumCallout = tonumber(rolePolicy.minimumCallout) or 0
+        end
+        self.draftWorkerOverrides[row.workerSlot] = override
+    end
     self.stagedDirty = true
     self:buildRows()
     if self.itemList ~= nil then
@@ -548,7 +617,7 @@ end
 function HelperPayrollMenu:onClickApply()
     self:cancelResetConfirmation()
     if HelperPayroll ~= nil and HelperPayroll.applyManagementDraft ~= nil then
-        local ok = HelperPayroll:applyManagementDraft(self.draftSettings, self.draftRates, self.draftMappings, "gui")
+        local ok = HelperPayroll:applyManagementDraft(self.draftSettings, self.draftRolePolicies, self.draftMappings, self.draftWorkerOverrides, "gui")
         if ok then
             self:refreshDraftFromRuntime()
             self:showTopic(self.currentTopic)

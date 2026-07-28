@@ -1,5 +1,5 @@
 -- Helper Payroll
--- Version: 0.3.3.1-beta-rc
+-- Version: 0.4.1.1-alpha2
 -- Purpose:
 --   1. Suppress vanilla AI worker payments.
 --   2. Track active AI jobs.
@@ -14,8 +14,8 @@ local hpGetTimeMs
 
 HelperPayroll = {}
 HelperPayroll.MOD_NAME = g_currentModName or "FS25_HelperPayroll"
-HelperPayroll.VERSION = "0.3.3.1"
-HelperPayroll.RELEASE_CHANNEL = "beta-rc"
+HelperPayroll.VERSION = "0.4.1.1"
+HelperPayroll.RELEASE_CHANNEL = "alpha2"
 HelperPayroll.MOD_DIRECTORY = g_currentModDirectory or ""
 HelperPayroll.BUNDLED_CONFIG_FILE = HelperPayroll.MOD_DIRECTORY .. "config/defaultPayrollConfig.xml"
 HelperPayroll.CONFIG_FILE = HelperPayroll.BUNDLED_CONFIG_FILE
@@ -50,6 +50,8 @@ HelperPayroll.helperSlotCounts = {}
 HelperPayroll.helperProfilesMappings = {}
 HelperPayroll.helperProfilesMappingsByIdentity = {}
 HelperPayroll.helperProfilesMappingsBySlot = {}
+HelperPayroll.integrationAPI = nil
+HelperPayroll.integrationAPIPublished = false
 HelperPayroll.originalFarmAddMoney = nil
 HelperPayroll.aiWorkerHooksInstalled = false
 HelperPayroll.aiPriceDebugCount = 0
@@ -65,6 +67,7 @@ HelperPayroll.workerLedger = {}
 HelperPayroll.workerLedgerCount = 0
 HelperPayroll.workerLedgerTotal = 0
 HelperPayroll.workerDailyLedger = {}
+HelperPayroll.dailyRatePaidDays = {}
 HelperPayroll.payrollCheckAccumulatorMs = 0
 HelperPayroll.payrollCheckIntervalMs = 5000
 HelperPayroll.lastPayrollClockDay = nil
@@ -220,29 +223,29 @@ local HPAY_DEFAULT_POLICY_XML = [=[
     </profiles>
 
     <workerRates profile="default">
-        <worker id="owner" name="Owner Labour" hourlyRate="0" />
-        <worker id="trainee" name="Trainee Helper" hourlyRate="10" />
-        <worker id="standard" name="Standard Helper" hourlyRate="18" />
-        <worker id="skilled" name="Skilled Operator" hourlyRate="22" />
-        <worker id="contractor" name="Contractor" hourlyRate="30" />
+        <worker id="owner" name="Owner Labour" payBasis="hourly" rate="0" minimumCallout="0" />
+        <worker id="trainee" name="Trainee Helper" payBasis="hourly" rate="10" minimumCallout="5" />
+        <worker id="standard" name="Standard Helper" payBasis="hourly" rate="18" minimumCallout="5" />
+        <worker id="skilled" name="Skilled Operator" payBasis="hourly" rate="22" minimumCallout="5" />
+        <worker id="contractor" name="Contractor" payBasis="hourly" rate="30" minimumCallout="5" />
     </workerRates>
 
     <workerRates profile="uk_tenant">
-        <worker id="owner" name="Owner Labour" hourlyRate="0" />
-        <worker id="trainee" name="Trainee Helper" hourlyRate="10" />
-        <worker id="standard" name="General Farmhand" hourlyRate="14" />
-        <worker id="skilled" name="Skilled Operator" hourlyRate="18" />
-        <worker id="manager" name="Farm Manager" hourlyRate="24" />
-        <worker id="contractor" name="External Contractor" hourlyRate="28" />
+        <worker id="owner" name="Owner Labour" payBasis="hourly" rate="0" minimumCallout="0" />
+        <worker id="trainee" name="Trainee Helper" payBasis="hourly" rate="10" minimumCallout="5" />
+        <worker id="standard" name="General Farmhand" payBasis="hourly" rate="14" minimumCallout="5" />
+        <worker id="skilled" name="Skilled Operator" payBasis="hourly" rate="18" minimumCallout="5" />
+        <worker id="manager" name="Farm Manager" payBasis="hourly" rate="24" minimumCallout="5" />
+        <worker id="contractor" name="External Contractor" payBasis="hourly" rate="28" minimumCallout="5" />
     </workerRates>
 
     <workerRates profile="us_ranch">
-        <worker id="owner" name="Owner Labour" hourlyRate="0" />
-        <worker id="trainee" name="Trainee Ranch Hand" hourlyRate="14" />
-        <worker id="standard" name="Ranch Hand" hourlyRate="18" />
-        <worker id="skilled" name="Skilled Operator" hourlyRate="24" />
-        <worker id="manager" name="Ranch Manager" hourlyRate="30" />
-        <worker id="contractor" name="External Contractor" hourlyRate="35" />
+        <worker id="owner" name="Owner Labour" payBasis="hourly" rate="0" minimumCallout="0" />
+        <worker id="trainee" name="Trainee Ranch Hand" payBasis="hourly" rate="14" minimumCallout="5" />
+        <worker id="standard" name="Ranch Hand" payBasis="hourly" rate="18" minimumCallout="5" />
+        <worker id="skilled" name="Skilled Operator" payBasis="hourly" rate="24" minimumCallout="5" />
+        <worker id="manager" name="Ranch Manager" payBasis="hourly" rate="30" minimumCallout="5" />
+        <worker id="contractor" name="External Contractor" payBasis="hourly" rate="35" minimumCallout="5" />
     </workerRates>
 
     <!-- Advanced mode only: used when payrollMode="helperSlot". -->
@@ -445,7 +448,10 @@ function HelperPayroll:buildPolicyConfigXmlFromRuntime()
             for _, roleId in ipairs(order) do
                 local w = rates[roleId]
                 if w ~= nil then
-                    add(string.format('        <worker id="%s" name="%s" hourlyRate="%s" />', hpayXmlEscape(roleId), hpayXmlEscape(w.name or roleId), hpayXmlEscape(tostring(tonumber(w.hourlyRate) or 0))))
+                    local payBasis = string.lower(tostring(w.payBasis or 'hourly')) == 'daily' and 'daily' or 'hourly'
+                    local rate = tonumber(w.rate)
+                    if rate == nil then rate = tonumber(w.hourlyRate) or 0 end
+                    add(string.format('        <worker id="%s" name="%s" payBasis="%s" rate="%s" hourlyRate="%s" minimumCallout="%s" />', hpayXmlEscape(roleId), hpayXmlEscape(w.name or roleId), hpayXmlEscape(payBasis), hpayXmlEscape(tostring(rate)), hpayXmlEscape(tostring(rate)), hpayXmlEscape(tostring(tonumber(w.minimumCallout) or tonumber(settings.minimumWorkerCharge) or 0))))
                 end
             end
             add('    </workerRates>')
@@ -489,10 +495,11 @@ function HelperPayroll:saveExternalPolicyConfigFromRuntime(reason)
     return false
 end
 
-function HelperPayroll:applyManagementDraft(draftSettings, draftRates, draftMappings, reason)
+function HelperPayroll:applyManagementDraft(draftSettings, draftRolePolicies, draftMappings, draftWorkerOverrides, reason)
     draftSettings = draftSettings or {}
-    draftRates = draftRates or {}
+    draftRolePolicies = draftRolePolicies or {}
     draftMappings = draftMappings or {}
+    draftWorkerOverrides = draftWorkerOverrides or {}
     self.settings.billingMode = tostring(draftSettings.billingMode or self.settings.billingMode or 'onJobFinish')
     self.settings.payrollHour = math.floor(tonumber(draftSettings.payrollHour or self.settings.payrollHour) or 18)
     self.settings.minimumWorkerCharge = tonumber(draftSettings.minimumWorkerCharge or self.settings.minimumWorkerCharge) or 0
@@ -504,15 +511,27 @@ function HelperPayroll:applyManagementDraft(draftSettings, draftRates, draftMapp
     self.settings.activePayrollProfile = tostring(draftSettings.activePayrollProfile or self.settings.activePayrollProfile or 'default')
     local profileId = self.settings.activePayrollProfile
     if self.workerRates ~= nil and self.workerRates[profileId] ~= nil then
-        for roleId, rate in pairs(draftRates) do
-            if self.workerRates[profileId][roleId] ~= nil then
-                self.workerRates[profileId][roleId].hourlyRate = tonumber(rate) or 0
+        for roleId, policy in pairs(draftRolePolicies) do
+            local role = self.workerRates[profileId][roleId]
+            if role ~= nil and policy ~= nil then
+                local rate = tonumber(policy.rate) or 0
+                role.payBasis = self:normalisePayBasis(policy.payBasis)
+                role.rate = rate
+                role.hourlyRate = rate -- legacy alias retained for older saves and console commands
+                role.minimumCallout = tonumber(policy.minimumCallout) or 0
             end
         end
     end
     for slot, roleId in pairs(draftMappings) do
         local hpSlotInfo = self:getHelperProfilesSlotInfo(slot)
-        self:setHelperProfilesPayrollMapping(hpSlotInfo, slot, roleId)
+        local mapping = self:setHelperProfilesPayrollMapping(hpSlotInfo, slot, roleId)
+        local override = draftWorkerOverrides[slot]
+        if mapping ~= nil and override ~= nil then
+            mapping.compensationMode = string.lower(tostring(override.compensationMode or "inherit")) == "custom" and "custom" or "inherit"
+            mapping.payBasis = self:normalisePayBasis(override.payBasis)
+            mapping.rate = tonumber(override.rate) or 0
+            mapping.minimumCallout = tonumber(override.minimumCallout) or 0
+        end
     end
     local ok = self:saveSavegameSettings(reason or 'management-ui')
     if ok then
@@ -643,10 +662,17 @@ function HelperPayroll:loadWorkerRates(xmlFile)
 
             local id = getXMLString(xmlFile, workerKey .. "#id")
             if id ~= nil then
+                local legacyHourlyRate = getXmlFloatOrDefault(xmlFile, workerKey .. "#hourlyRate", 0)
+                local payBasis = string.lower(tostring(getXmlStringOrDefault(xmlFile, workerKey .. "#payBasis", "hourly")))
+                if payBasis ~= "daily" then payBasis = "hourly" end
+                local rate = getXmlFloatOrDefault(xmlFile, workerKey .. "#rate", legacyHourlyRate)
                 self.workerRates[profile][id] = {
                     id = id,
                     name = getXmlStringOrDefault(xmlFile, workerKey .. "#name", id),
-                    hourlyRate = getXmlFloatOrDefault(xmlFile, workerKey .. "#hourlyRate", 0)
+                    payBasis = payBasis,
+                    rate = rate,
+                    hourlyRate = rate,
+                    minimumCallout = getXmlFloatOrDefault(xmlFile, workerKey .. "#minimumCallout", self.settings.minimumWorkerCharge or 0)
                 }
                 table.insert(self.workerRateOrder[profile], id)
             end
@@ -934,10 +960,11 @@ function HelperPayroll:selectRoleByOffset(offset)
 
     local worker = self:getWorkerRateById(profileId, newRole)
     local workerName = worker ~= nil and worker.name or newRole
-    local hourlyRate = worker ~= nil and tonumber(worker.hourlyRate) or 0
+    local hourlyRate = worker ~= nil and tonumber(worker.rate or worker.hourlyRate) or 0
+    local rateUnit = worker ~= nil and self:normalisePayBasis(worker.payBasis) == "daily" and "day" or "hr"
 
     rcLog("Selected payroll role changed: profile=%s role=%s name=%s rate=%.2f", tostring(profileId), tostring(newRole), tostring(workerName), hourlyRate or 0)
-    self:showRoleMessage(string.format("Helper Payroll Role: %s (%.2f/hr)", tostring(workerName), hourlyRate or 0))
+    self:showRoleMessage(string.format("Helper Payroll Role: %s (%.2f/%s)", tostring(workerName), hourlyRate or 0, rateUnit))
 end
 
 function HelperPayroll:handleRoleInput(actionLabel, offset, actionName, inputValue, callbackState, isAnalog)
@@ -1268,10 +1295,11 @@ function HelperPayroll:drawRoleList()
         local roleId = order[idx]
         local worker = self:getWorkerRateById(profileId, roleId)
         local name = worker ~= nil and worker.name or roleId
-        local rate = worker ~= nil and tonumber(worker.hourlyRate) or 0
+        local rate = worker ~= nil and tonumber(worker.rate or worker.hourlyRate) or 0
+        local rateUnit = worker ~= nil and self:normalisePayBasis(worker.payBasis) == "daily" and "day" or "hr"
         local selected = tostring(roleId) == selectedRole
         local marker = selected and "» sel" or ""
-        local lineText = string.format("%02d  %s  %.2f/hr%s", idx, hpEllipsize(name, 30), rate or 0, marker ~= "" and ("  " .. marker) or "")
+        local lineText = string.format("%02d  %s  %.2f/%s%s", idx, hpEllipsize(name, 30), rate or 0, rateUnit, marker ~= "" and ("  " .. marker) or "")
 
         if selected then
             hpSafeSetTextColor(1.00, 0.95, 0.65, 1)
@@ -1290,8 +1318,9 @@ function HelperPayroll:getCurrentRoleDisplay()
     local roleId = tostring(self.settings.selectedRole or self.settings.fallbackRole or "standard")
     local worker = self:getWorkerRateById(profileId, roleId)
     local name = worker ~= nil and worker.name or roleId
-    local rate = worker ~= nil and tonumber(worker.hourlyRate) or 0
-    return tostring(name), roleId, rate, tostring(profileId)
+    local rate = worker ~= nil and tonumber(worker.rate or worker.hourlyRate) or 0
+    local payBasis = worker ~= nil and self:normalisePayBasis(worker.payBasis) or "hourly"
+    return tostring(name), roleId, rate, tostring(profileId), payBasis
 end
 
 function HelperPayroll:buildReportOverlayLines()
@@ -1303,7 +1332,7 @@ function HelperPayroll:buildReportOverlayLines()
     local summary = idx.summary or {}
     local periodId = self:getLedgerPeriodId(self:getGameDateKey())
     local period = idx.periods ~= nil and idx.periods[periodId] or nil
-    local roleName, roleId, roleRate = self:getCurrentRoleDisplay()
+    local roleName, roleId, roleRate, _, rolePayBasis = self:getCurrentRoleDisplay()
     local page = math.floor(tonumber(self.reportOverlayPage) or 1)
     if page < 1 then page = 1 end
     if page > 4 then page = 4 end
@@ -1316,7 +1345,7 @@ function HelperPayroll:buildReportOverlayLines()
         table.insert(lines, string.format("Total charged: %s", hpFmtMoney(summary.charged)))
         table.insert(lines, string.format("Jobs: %d | Hours: %s | Minimum jobs: %d", tonumber(summary.jobs) or 0, hpFmtHours(summary.hours), tonumber(summary.minimumJobs) or 0))
         table.insert(lines, string.format("Labour: %s | Calculated: %s", hpFmtMoney(summary.labour), hpFmtMoney(summary.calculated)))
-        table.insert(lines, string.format("Selected role: %s (%s/hr)", tostring(roleName), hpFmtRate(roleRate)))
+        table.insert(lines, string.format("Selected role: %s (%s/%s)", tostring(roleName), hpFmtRate(roleRate), rolePayBasis == "daily" and "day" or "hr"))
     elseif page == 2 then
         table.insert(lines, "HelperPayroll Report  [2/4] Current Period")
         table.insert(lines, string.format("Period: %s", tostring(periodId)))
@@ -2143,6 +2172,10 @@ function HelperPayroll:setHelperProfilesPayrollMapping(slotInfo, slot, roleId)
     mapping.helperName = slotInfo ~= nil and slotInfo.displayName or (slot ~= nil and ("Helper " .. slot) or "Helper")
     mapping.roleId = roleId
     mapping.workerRateId = roleId
+    mapping.compensationMode = mapping.compensationMode or "inherit"
+    mapping.payBasis = mapping.payBasis or "hourly"
+    mapping.rate = tonumber(mapping.rate) or 0
+    mapping.minimumCallout = tonumber(mapping.minimumCallout) or 0
     self:rebuildHelperProfilesMappingIndexes()
     return mapping
 end
@@ -2162,6 +2195,237 @@ function HelperPayroll:getEffectiveHelperProfilesRole(slotInfo, slot, profileId)
     return tostring(self.settings.fallbackRole or "standard"), nil, "fallback-role"
 end
 
+
+-- Public optional integration API consumed by HelperProfiles and other companion mods.
+-- The API owns all payroll validation and persistence; callers never edit payroll XML
+-- or internal mapping tables directly.
+function HelperPayroll:normaliseIntegrationSlot(slot)
+    local text = string.upper(tostring(slot or "")):gsub("^%s+", ""):gsub("%s+$", "")
+    if #text ~= 1 or text < "A" or text > "J" then
+        return nil
+    end
+    return text
+end
+
+function HelperPayroll:getIntegrationRoleRows()
+    local profileId = tostring(self.settings.activePayrollProfile or "default")
+    local roles = {}
+    for _, roleId in ipairs(self:getWorkerRateOrder(profileId) or {}) do
+        local worker = self:getWorkerRateById(profileId, roleId)
+        if worker ~= nil then
+            local rate = tonumber(worker.rate)
+            if rate == nil then rate = tonumber(worker.hourlyRate) or 0 end
+            table.insert(roles, {
+                id = tostring(roleId),
+                name = tostring(worker.name or roleId),
+                payBasis = self:normalisePayBasis(worker.payBasis),
+                rate = rate,
+                minimumCallout = tonumber(worker.minimumCallout) or tonumber(self.settings.minimumWorkerCharge) or 0,
+                profileId = profileId
+            })
+        end
+    end
+    return roles
+end
+
+function HelperPayroll:getIntegrationRoleForSlot(slot)
+    local normalizedSlot = self:normaliseIntegrationSlot(slot)
+    if normalizedSlot == nil then
+        return nil, "invalid-slot"
+    end
+
+    local profileId = tostring(self.settings.activePayrollProfile or "default")
+    local slotInfo = self:getHelperProfilesSlotInfo(normalizedSlot)
+    local roleId, mapping, source = self:getEffectiveHelperProfilesRole(slotInfo, normalizedSlot, profileId)
+    local worker = self:getWorkerRateById(profileId, roleId)
+    if worker == nil then
+        roleId = tostring(self.settings.fallbackRole or "standard")
+        worker = self:getWorkerRateById(profileId, roleId)
+        source = "fallback-role"
+    end
+
+    return {
+        slot = normalizedSlot,
+        identityId = slotInfo ~= nil and slotInfo.identityId or ("slot:" .. normalizedSlot),
+        identitySource = slotInfo ~= nil and slotInfo.identitySource or "slotFallback",
+        helperName = slotInfo ~= nil and slotInfo.displayName or ("Helper " .. normalizedSlot),
+        roleId = tostring(roleId),
+        roleName = worker ~= nil and tostring(worker.name or roleId) or tostring(roleId),
+        mappingSource = tostring(source or "unknown"),
+        explicitMapping = mapping ~= nil,
+        payrollMode = tostring(self.settings.payrollMode or "roleType"),
+        profileId = profileId
+    }, nil
+end
+
+function HelperPayroll:applyIntegrationRoleMappings(roleMappings, reason)
+    if self.isInitialized ~= true then
+        return false, "not-initialized"
+    end
+    if type(roleMappings) ~= "table" then
+        return false, "invalid-mappings"
+    end
+
+    local profileId = tostring(self.settings.activePayrollProfile or "default")
+    local validated = {}
+    for slot, roleId in pairs(roleMappings) do
+        local normalizedSlot = self:normaliseIntegrationSlot(slot)
+        local normalizedRoleId = tostring(roleId or "")
+        if normalizedSlot == nil then
+            return false, "invalid-slot:" .. tostring(slot)
+        end
+        if normalizedRoleId == "" or self:getWorkerRateById(profileId, normalizedRoleId) == nil then
+            return false, "invalid-role:" .. normalizedRoleId
+        end
+        table.insert(validated, {slot = normalizedSlot, roleId = normalizedRoleId})
+    end
+
+    table.sort(validated, function(a, b) return a.slot < b.slot end)
+    for _, item in ipairs(validated) do
+        local slotInfo = self:getHelperProfilesSlotInfo(item.slot)
+        self:setHelperProfilesPayrollMapping(slotInfo, item.slot, item.roleId)
+    end
+
+    local ok = self:saveSavegameSettings(reason or "helperprofiles-role-ui")
+    if not ok then
+        return false, "save-failed"
+    end
+
+    rcLog(
+        "HelperProfiles role mappings applied through public API: reason=%s profile=%s mappings=%d",
+        tostring(reason or "helperprofiles-role-ui"),
+        tostring(profileId),
+        #validated
+    )
+    return true, {
+        applied = #validated,
+        profileId = profileId,
+        payrollMode = tostring(self.settings.payrollMode or "roleType")
+    }
+end
+
+function HelperPayroll:buildIntegrationAPI()
+    local owner = self
+    local api = {
+        apiVersion = 1,
+        modName = "FS25_HelperPayroll",
+        modVersion = tostring(self.VERSION or "0.4.1.1"),
+        readOnly = false
+    }
+
+    function api:getStatus()
+        return {
+            available = owner.isInitialized == true,
+            apiVersion = self.apiVersion,
+            modName = self.modName,
+            modVersion = self.modVersion,
+            activePayrollProfile = tostring(owner.settings.activePayrollProfile or "default"),
+            payrollMode = tostring(owner.settings.payrollMode or "roleType"),
+            billingMode = tostring(owner.settings.billingMode or "onJobFinish")
+        }
+    end
+
+    function api:getRoles()
+        return owner:getIntegrationRoleRows()
+    end
+
+    function api:getRoleForSlot(slot)
+        return owner:getIntegrationRoleForSlot(slot)
+    end
+
+    function api:applyRoleMappings(roleMappings, reason)
+        return owner:applyIntegrationRoleMappings(roleMappings, reason)
+    end
+
+    return api
+end
+
+function HelperPayroll:publishIntegrationAPI(reason)
+    if self.integrationAPI == nil then
+        self.integrationAPI = self:buildIntegrationAPI()
+    end
+    self.integrationAPI.modVersion = tostring(self.VERSION or "0.4.1.1")
+
+    -- Publish globally as well as on the mission. GUI dialogs can be created
+    -- during a different mission lifecycle phase, so mission-only publication
+    -- is too sensitive to mod load order.
+    local changed = rawget(_G, "FS25_HelperPayroll_API") ~= self.integrationAPI
+    _G.FS25_HelperPayroll_API = self.integrationAPI
+    _G.FS25_HelperPayrollAPI = self.integrationAPI
+
+    if g_currentMission ~= nil then
+        changed = changed
+            or g_currentMission.helperPayrollAPI ~= self.integrationAPI
+            or g_currentMission.fs25HelperPayrollAPI ~= self.integrationAPI
+        g_currentMission.helperPayrollAPI = self.integrationAPI
+        g_currentMission.fs25HelperPayrollAPI = self.integrationAPI
+    end
+    self.integrationAPIPublished = true
+
+    if changed then
+        rcLog(
+            "Published optional payroll API: reason=%s apiVersion=%s modVersion=%s",
+            tostring(reason or "unknown"),
+            tostring(self.integrationAPI.apiVersion),
+            tostring(self.integrationAPI.modVersion)
+        )
+    end
+    return true
+end
+
+function HelperPayroll:unpublishIntegrationAPI()
+    if self.integrationAPI ~= nil then
+        if rawget(_G, "FS25_HelperPayroll_API") == self.integrationAPI then
+            _G.FS25_HelperPayroll_API = nil
+        end
+        if rawget(_G, "FS25_HelperPayrollAPI") == self.integrationAPI then
+            _G.FS25_HelperPayrollAPI = nil
+        end
+        if g_currentMission ~= nil then
+            if g_currentMission.helperPayrollAPI == self.integrationAPI then
+                g_currentMission.helperPayrollAPI = nil
+            end
+            if g_currentMission.fs25HelperPayrollAPI == self.integrationAPI then
+                g_currentMission.fs25HelperPayrollAPI = nil
+            end
+        end
+    end
+    self.integrationAPIPublished = false
+end
+
+function HelperPayroll:normalisePayBasis(value)
+    return string.lower(tostring(value or "hourly")) == "daily" and "daily" or "hourly"
+end
+
+function HelperPayroll:getRoleCompensationPolicy(profileId, roleId)
+    local worker = self:getWorkerRateById(profileId, roleId)
+    if worker == nil then return nil end
+    local rate = tonumber(worker.rate)
+    if rate == nil then rate = tonumber(worker.hourlyRate) or 0 end
+    return {
+        payBasis = self:normalisePayBasis(worker.payBasis),
+        rate = rate,
+        minimumCallout = tonumber(worker.minimumCallout) or tonumber(self.settings.minimumWorkerCharge) or 0,
+        source = "role"
+    }
+end
+
+function HelperPayroll:getEffectiveCompensationPolicy(profileId, roleId, mapping)
+    local policy = self:getRoleCompensationPolicy(profileId, roleId) or {
+        payBasis = "hourly",
+        rate = 0,
+        minimumCallout = tonumber(self.settings.minimumWorkerCharge) or 0,
+        source = "fallback"
+    }
+    if mapping ~= nil and string.lower(tostring(mapping.compensationMode or "inherit")) == "custom" then
+        policy.payBasis = self:normalisePayBasis(mapping.payBasis)
+        policy.rate = tonumber(mapping.rate) or policy.rate
+        policy.minimumCallout = tonumber(mapping.minimumCallout) or policy.minimumCallout
+        policy.source = "worker-override"
+    end
+    return policy
+end
+
 function HelperPayroll:resolveWorkerAssignment(tracked)
     local _, profileId = self:getActiveProfile()
     local helperSlot, helperSlotSource = self:detectHelperSlotForJob(tracked ~= nil and tracked.job or nil, tracked)
@@ -2170,6 +2434,7 @@ function HelperPayroll:resolveWorkerAssignment(tracked)
     local hpSlotInfo = self:getHelperProfilesSlotInfo(helperSlot)
     local identitySource = hpSlotInfo ~= nil and tostring(hpSlotInfo.source or "HelperProfilesAPI") or "HelperPayroll"
     local mappingSource = "roleType"
+    local payrollMapping = nil
 
     local workerId = self.settings.selectedRole or self.settings.fallbackRole or "standard"
     local helperName = nil
@@ -2178,6 +2443,7 @@ function HelperPayroll:resolveWorkerAssignment(tracked)
     if self:isHelperSlotPayrollMode() and helperSlot ~= nil then
         local roleId, mapping, resolvedSource = self:getEffectiveHelperProfilesRole(hpSlotInfo, helperSlot, profileId)
         workerId = roleId
+        payrollMapping = mapping
         mappingSource = resolvedSource
         helperSlotUsedForPayroll = true
         helperName = hpSlotInfo ~= nil and hpSlotInfo.displayName or (mapping ~= nil and mapping.helperName) or ("Helper " .. tostring(helperSlot))
@@ -2202,6 +2468,8 @@ function HelperPayroll:resolveWorkerAssignment(tracked)
         helperRole = worker.name or helperRole or "Worker"
     end
 
+    local compensation = self:getEffectiveCompensationPolicy(profileId, workerId, payrollMapping)
+
     return {
         profileId = profileId,
         payrollMode = payrollMode,
@@ -2212,7 +2480,11 @@ function HelperPayroll:resolveWorkerAssignment(tracked)
         helperRole = helperRole,
         workerId = workerId,
         workerName = worker.name or workerId or "Worker",
-        hourlyRate = tonumber(worker.hourlyRate) or 0,
+        payBasis = compensation.payBasis,
+        payRate = compensation.rate,
+        minimumCallout = compensation.minimumCallout,
+        compensationSource = compensation.source,
+        hourlyRate = compensation.rate,
         helperIdentityId = hpSlotInfo ~= nil and hpSlotInfo.identityId or nil,
         helperIdentitySource = identitySource,
         helperMappingSource = mappingSource,
@@ -2347,10 +2619,11 @@ end
 function HelperPayroll:calculateWorkerCharge(tracked)
     local assignment = self:getWorkerAssignmentForBilling(tracked)
     local elapsedHours = (tracked ~= nil and tracked.elapsedMs or 0) / 3600000
-    local hourlyRate = tonumber(assignment.hourlyRate) or 0
-    local labourCharge = elapsedHours * hourlyRate
-    local calloutFee = tonumber(self.settings.workerCalloutFee) or 0
-    local minimumCharge = tonumber(self.settings.minimumWorkerCharge) or 0
+    local payBasis = self:normalisePayBasis(assignment.payBasis)
+    local payRate = tonumber(assignment.payRate or assignment.hourlyRate) or 0
+    local labourCharge = payBasis == "daily" and payRate or (elapsedHours * payRate)
+    local calloutFee = payBasis == "daily" and 0 or (tonumber(self.settings.workerCalloutFee) or 0)
+    local minimumCharge = payBasis == "daily" and 0 or (tonumber(assignment.minimumCallout) or tonumber(self.settings.minimumWorkerCharge) or 0)
     local subtotal = labourCharge + calloutFee
     local appliedMinimum = false
     local charge = subtotal
@@ -2363,6 +2636,9 @@ function HelperPayroll:calculateWorkerCharge(tracked)
     charge = self:roundCurrency(charge)
 
     assignment.elapsedHours = elapsedHours
+    assignment.payBasis = payBasis
+    assignment.payRate = payRate
+    assignment.hourlyRate = payRate
     assignment.labourCharge = self:roundCurrency(labourCharge)
     assignment.calloutFee = self:roundCurrency(calloutFee)
     assignment.minimumCharge = self:roundCurrency(minimumCharge)
@@ -2396,6 +2672,43 @@ function HelperPayroll:getDailyLedgerKey(entry)
     )
 end
 
+function HelperPayroll:hasDailyRateBeenPaid(entry)
+    if entry == nil or self:normalisePayBasis(entry.payBasis) ~= "daily" then return false end
+    local key = self:getDailyLedgerKey(entry)
+    return self.dailyRatePaidDays ~= nil and self.dailyRatePaidDays[key] ~= nil
+end
+
+function HelperPayroll:markDailyRatePaid(entry, charge, paymentSource)
+    if entry == nil or self:normalisePayBasis(entry.payBasis) ~= "daily" then return end
+    self.dailyRatePaidDays = self.dailyRatePaidDays or {}
+    local key = self:getDailyLedgerKey(entry)
+    self.dailyRatePaidDays[key] = {
+        key = key,
+        gameDate = entry.gameDate,
+        workMonotonicDay = entry.workMonotonicDay,
+        profileId = entry.profileId or entry.profile,
+        helperSlot = entry.helperSlot,
+        helperIdentityId = entry.helperIdentityId,
+        helperName = entry.helperName or entry.helper,
+        workerId = entry.workerId or entry.workerRate,
+        farmId = entry.farmId,
+        payRate = tonumber(entry.payRate or entry.hourlyRate or entry.rate) or 0,
+        charged = tonumber(charge) or 0,
+        source = paymentSource or "daily-rate"
+    }
+end
+
+function HelperPayroll:pruneDailyRatePaidDays()
+    local currentDay = tonumber(self:getGameClockSnapshot().monotonicDay)
+    if currentDay == nil then return end
+    for key, payment in pairs(self.dailyRatePaidDays or {}) do
+        local workDay = tonumber(payment ~= nil and payment.workMonotonicDay or nil)
+        if workDay ~= nil and currentDay - workDay > 2 then
+            self.dailyRatePaidDays[key] = nil
+        end
+    end
+end
+
 function HelperPayroll:updateDailyLedger(entry, quiet)
     if entry == nil then
         return nil
@@ -2420,6 +2733,10 @@ function HelperPayroll:updateDailyLedger(entry, quiet)
             helperRole = entry.helperRole or entry.role,
             workerId = entry.workerId or entry.workerRate,
             hourlyRate = tonumber(entry.hourlyRate or entry.rate) or 0,
+            payBasis = self:normalisePayBasis(entry.payBasis),
+            payRate = tonumber(entry.payRate or entry.hourlyRate or entry.rate) or 0,
+            minimumCallout = tonumber(entry.minimumCallout or entry.minimumCharge) or tonumber(self.settings.minimumWorkerCharge) or 0,
+            compensationSource = entry.compensationSource or "role",
             farmId = tonumber(entry.farmId) or entry.farmId,
             jobs = 0,
             hours = 0,
@@ -2434,7 +2751,11 @@ function HelperPayroll:updateDailyLedger(entry, quiet)
     daily.jobs = (daily.jobs or 0) + 1
     daily.hours = (daily.hours or 0) + (tonumber(entry.elapsedHours) or 0)
     daily.charged = (daily.charged or 0) + (tonumber(entry.charge) or 0)
-    daily.labour = (daily.labour or 0) + (tonumber(entry.labourCharge or entry.labour) or 0)
+    if self:normalisePayBasis(daily.payBasis) == "daily" then
+        daily.labour = math.max(tonumber(daily.labour) or 0, tonumber(entry.payRate or entry.labourCharge or entry.labour) or 0)
+    else
+        daily.labour = (daily.labour or 0) + (tonumber(entry.labourCharge or entry.labour) or 0)
+    end
 
     if quiet ~= true then
         rcLog(
@@ -2504,6 +2825,10 @@ function HelperPayroll:recoverPendingDailyPayrollFromLedger()
                 helperRole = entry.role,
                 workerId = entry.workerRate,
                 hourlyRate = tonumber(entry.rate) or 0,
+                payBasis = entry.payBasis or "hourly",
+                payRate = tonumber(entry.payRate or entry.rate) or 0,
+                minimumCallout = tonumber(entry.minimumCallout or entry.minimum) or tonumber(self.settings.minimumWorkerCharge) or 0,
+                compensationSource = entry.compensationSource or "legacy-ledger",
                 farmId = tonumber(entry.farmId) or 1,
                 elapsedHours = tonumber(entry.elapsedHours) or 0,
                 labourCharge = tonumber(entry.labour) or 0,
@@ -2543,9 +2868,13 @@ function HelperPayroll:calculateDailyPayrollCharge(daily)
         return 0, false
     end
 
+    local payBasis = self:normalisePayBasis(daily.payBasis)
     local labour = tonumber(daily.labour) or 0
+    if payBasis == "daily" then
+        return self:roundCurrency(tonumber(daily.payRate) or labour), false
+    end
     local calloutFee = tonumber(self.settings.workerCalloutFee) or 0
-    local minimumCharge = tonumber(self.settings.minimumWorkerCharge) or 0
+    local minimumCharge = tonumber(daily.minimumCallout) or tonumber(self.settings.minimumWorkerCharge) or 0
     local subtotal = labour
 
     if daily.jobs ~= nil and daily.jobs > 0 then
@@ -2684,6 +3013,8 @@ function HelperPayroll:processDailyPayroll(dt, force, triggerReason)
         local due, dueReason = self:isDailyPayrollRowDue(daily, clock, payrollHour)
         if due then
             local charge, minimumApplied = self:calculateDailyPayrollCharge(daily)
+            local dailyRateAlreadyPaid = self:hasDailyRateBeenPaid(daily)
+            if dailyRateAlreadyPaid then charge = 0; minimumApplied = false end
             local farmId = daily.farmId or self:getActiveFarmId()
             local applied = charge <= 0 or self:applyMoneyCharge(charge, farmId, "Daily payroll charge")
             if applied then
@@ -2696,6 +3027,9 @@ function HelperPayroll:processDailyPayroll(dt, force, triggerReason)
                 rowsPaid = rowsPaid + 1
                 totalPaid = totalPaid + charge
                 self.workerLedgerTotal = (self.workerLedgerTotal or 0) + charge
+                if not dailyRateAlreadyPaid then
+                    self:markDailyRatePaid(daily, charge, "daily-payroll")
+                end
                 rcLog(
                     "Daily payroll settled: reason=%s workDate=%s workMonotonicDay=%s paidDate=%s paidMonotonicDay=%s helperSlot=%s identityId=%s helper=%s role=%s jobs=%d hours=%.3f labour=%.2f callout=%.2f minimum=%.2f minimumApplied=%s charge=%.2f farmId=%s payrollHour=%s moneyType=%s",
                     tostring(dueReason),
@@ -2788,6 +3122,10 @@ function HelperPayroll:applyWorkerCharge(tracked)
         helperRole = breakdown.helperRole,
         elapsedHours = breakdown.elapsedHours,
         hourlyRate = breakdown.hourlyRate,
+        payBasis = breakdown.payBasis,
+        payRate = breakdown.payRate,
+        minimumCallout = breakdown.minimumCallout,
+        compensationSource = breakdown.compensationSource,
         charge = 0,
         calculatedJobCharge = chargeToApply,
         farmId = farmId,
@@ -2803,6 +3141,23 @@ function HelperPayroll:applyWorkerCharge(tracked)
     entry.minimumCharge = breakdown.minimumCharge
     entry.appliedMinimum = breakdown.appliedMinimum
     self.workerLedger[self.workerLedgerCount] = entry
+
+    if self:hasDailyRateBeenPaid(entry) then
+        entry.calculatedJobCharge = 0
+        rcLog("Day-rate worker already paid for workDate=%s helper=%s workerRate=%s; additional job recorded with no extra charge", tostring(entry.gameDate), tostring(entry.helperName), tostring(entry.workerId))
+        self:recordPersistentLedgerEntry(self:buildPersistentLedgerEntryFromWorkerEntry(entry, "daily-rate-already-paid"), "job-daily-rate-already-paid")
+        return true
+    end
+
+    if self:normalisePayBasis(entry.payBasis) == "daily" then
+        local pending = self.workerDailyLedger ~= nil and self.workerDailyLedger[self:getDailyLedgerKey(entry)] or nil
+        if pending ~= nil and pending.payrollApplied ~= true and (tonumber(pending.jobs) or 0) > 0 then
+            entry.calculatedJobCharge = 0
+            entry.labourCharge = 0
+            rcLog("Day-rate worker already has a pending payment for workDate=%s helper=%s; additional job recorded with no extra calculated charge", tostring(entry.gameDate), tostring(entry.helperName))
+        end
+    end
+
     local daily = self:updateDailyLedger(entry)
 
     if self:isDailyPayrollMode() then
@@ -2850,6 +3205,7 @@ function HelperPayroll:applyWorkerCharge(tracked)
     end
 
     entry.charge = chargeToApply
+    self:markDailyRatePaid(entry, chargeToApply, "job-finish")
     if daily ~= nil then
         daily.charged = (tonumber(daily.charged) or 0) + chargeToApply
     end
@@ -2886,6 +3242,10 @@ function HelperPayroll:applyWorkerCharge(tracked)
     )
 
     self:recordPersistentLedgerEntry(self:buildPersistentLedgerEntryFromWorkerEntry(entry, "charged"), "job-charged")
+
+    if self:normalisePayBasis(entry.payBasis) == "daily" then
+        self:saveSavegameSettings("daily-rate-job-finish-paid")
+    end
 
     return true
 end
@@ -3231,12 +3591,13 @@ function HelperPayroll:setSelectedRole(roleOrIndex, sourceLabel)
     self:saveSavegameSettings("role-set")
     local worker = self:getWorkerRateById(profileId, newRole)
     local workerName = worker ~= nil and worker.name or newRole
-    local hourlyRate = worker ~= nil and tonumber(worker.hourlyRate) or 0
+    local hourlyRate = worker ~= nil and tonumber(worker.rate or worker.hourlyRate) or 0
+    local rateUnit = worker ~= nil and self:normalisePayBasis(worker.payBasis) == "daily" and "day" or "hr"
 
     hpayPrintf("Selected payroll role changed%s: profile=%s role=%s name=%s rate=%.2f",
         sourceLabel ~= nil and (" via " .. tostring(sourceLabel)) or "",
         tostring(profileId), tostring(newRole), tostring(workerName), hourlyRate or 0)
-    self:showRoleMessage(string.format("Helper Payroll Role: %s (%.2f/hr)", tostring(workerName), hourlyRate or 0))
+    self:showRoleMessage(string.format("Helper Payroll Role: %s (%.2f/%s)", tostring(workerName), hourlyRate or 0, rateUnit))
     return true
 end
 
@@ -3261,6 +3622,7 @@ end
 function HelperPayroll:loadSavegameSettings()
     self:initPersistencePaths()
     self.workerDailyLedger = {}
+    self.dailyRatePaidDays = {}
     local path = self.persistence ~= nil and self.persistence.filePath or nil
     if path == nil or path == "" then
         rcWarn("Savegame persistence skipped: no settings path resolved")
@@ -3303,8 +3665,11 @@ function HelperPayroll:loadSavegameSettings()
         if not hasXMLProperty(xmlFile, key) then break end
         local profileId = getXmlStringOrDefault(xmlFile, key .. "#profile", self.settings.activePayrollProfile or "default")
         local roleId = getXmlStringOrDefault(xmlFile, key .. "#role", "")
-        local hourlyRate = getXmlFloatOrDefault(xmlFile, key .. "#hourlyRate", nil)
-        if roleId ~= nil and roleId ~= "" and hourlyRate ~= nil then
+        local legacyHourlyRate = getXmlFloatOrDefault(xmlFile, key .. "#hourlyRate", nil)
+        local rate = getXmlFloatOrDefault(xmlFile, key .. "#rate", legacyHourlyRate)
+        local payBasis = string.lower(tostring(getXmlStringOrDefault(xmlFile, key .. "#payBasis", "hourly")))
+        if payBasis ~= "daily" then payBasis = "hourly" end
+        if roleId ~= nil and roleId ~= "" and rate ~= nil then
             savedRatesByProfile[profileId] = savedRatesByProfile[profileId] or {}
             savedRateOrderByProfile[profileId] = savedRateOrderByProfile[profileId] or {}
             if savedRatesByProfile[profileId][roleId] == nil then
@@ -3315,7 +3680,10 @@ function HelperPayroll:loadSavegameSettings()
             savedRatesByProfile[profileId][roleId] = {
                 id = roleId,
                 name = getXmlStringOrDefault(xmlFile, key .. "#name", roleId),
-                hourlyRate = tonumber(hourlyRate) or 0
+                payBasis = payBasis,
+                rate = tonumber(rate) or 0,
+                hourlyRate = tonumber(rate) or 0,
+                minimumCallout = getXmlFloatOrDefault(xmlFile, key .. "#minimumCallout", self.settings.minimumWorkerCharge or 0)
             }
         end
         rateIndex = rateIndex + 1
@@ -3371,7 +3739,11 @@ function HelperPayroll:loadSavegameSettings()
             slot = string.upper(getXmlStringOrDefault(xmlFile, key .. "#slot", "")),
             helperName = getXmlStringOrDefault(xmlFile, key .. "#helperName", ""),
             roleId = getXmlStringOrDefault(xmlFile, key .. "#roleId", self.settings.fallbackRole or "standard"),
-            workerRateId = getXmlStringOrDefault(xmlFile, key .. "#workerRateId", self.settings.fallbackRole or "standard")
+            workerRateId = getXmlStringOrDefault(xmlFile, key .. "#workerRateId", self.settings.fallbackRole or "standard"),
+            compensationMode = getXmlStringOrDefault(xmlFile, key .. "#compensationMode", "inherit"),
+            payBasis = getXmlStringOrDefault(xmlFile, key .. "#payBasis", "hourly"),
+            rate = getXmlFloatOrDefault(xmlFile, key .. "#rate", 0),
+            minimumCallout = getXmlFloatOrDefault(xmlFile, key .. "#minimumCallout", 0)
         }
         if mapping.identityId ~= "" or mapping.slot ~= "" then
             table.insert(self.helperProfilesMappings, mapping)
@@ -3398,6 +3770,10 @@ function HelperPayroll:loadSavegameSettings()
             helperRole = getXmlStringOrDefault(xmlFile, key .. "#helperRole", "Worker"),
             workerId = getXmlStringOrDefault(xmlFile, key .. "#workerId", self.settings.fallbackRole or "standard"),
             hourlyRate = getXmlFloatOrDefault(xmlFile, key .. "#hourlyRate", 0),
+            payBasis = getXmlStringOrDefault(xmlFile, key .. "#payBasis", "hourly"),
+            payRate = getXmlFloatOrDefault(xmlFile, key .. "#payRate", getXmlFloatOrDefault(xmlFile, key .. "#hourlyRate", 0)),
+            minimumCallout = getXmlFloatOrDefault(xmlFile, key .. "#minimumCallout", self.settings.minimumWorkerCharge or 0),
+            compensationSource = getXmlStringOrDefault(xmlFile, key .. "#compensationSource", "legacy"),
             farmId = getXmlFloatOrDefault(xmlFile, key .. "#farmId", 1),
             jobs = getXmlFloatOrDefault(xmlFile, key .. "#jobs", 0),
             hours = getXmlFloatOrDefault(xmlFile, key .. "#hours", 0),
@@ -3415,6 +3791,30 @@ function HelperPayroll:loadSavegameSettings()
     if pendingIndex > 0 then
         rcLog("Loaded pending daily payroll rows: rows=%d", pendingIndex)
     end
+
+    local paidIndex = 0
+    while true do
+        local key = string.format("helperPayrollSave.dailyRatePaid.payment(%d)", paidIndex)
+        if not hasXMLProperty(xmlFile, key) then break end
+        local payment = {
+            key = getXmlStringOrDefault(xmlFile, key .. "#key", ""),
+            gameDate = getXmlStringOrDefault(xmlFile, key .. "#gameDate", "unknown"),
+            workMonotonicDay = getXmlFloatOrDefault(xmlFile, key .. "#workMonotonicDay", nil),
+            profileId = getXmlStringOrDefault(xmlFile, key .. "#profileId", self.settings.activePayrollProfile or "default"),
+            helperSlot = getXmlStringOrDefault(xmlFile, key .. "#helperSlot", "unassigned"),
+            helperIdentityId = getXmlStringOrDefault(xmlFile, key .. "#helperIdentityId", ""),
+            helperName = getXmlStringOrDefault(xmlFile, key .. "#helperName", "Worker"),
+            workerId = getXmlStringOrDefault(xmlFile, key .. "#workerId", self.settings.fallbackRole or "standard"),
+            farmId = getXmlFloatOrDefault(xmlFile, key .. "#farmId", 1),
+            payRate = getXmlFloatOrDefault(xmlFile, key .. "#payRate", 0),
+            charged = getXmlFloatOrDefault(xmlFile, key .. "#charged", 0),
+            source = getXmlStringOrDefault(xmlFile, key .. "#source", "daily-rate")
+        }
+        if payment.key == "" then payment.key = self:getDailyLedgerKey(payment) end
+        self.dailyRatePaidDays[payment.key] = payment
+        paidIndex = paidIndex + 1
+    end
+    if paidIndex > 0 then rcLog("Loaded day-rate payment markers: rows=%d", paidIndex) end
 
     self.settings.roleSelectorDebounceMs = getXmlFloatOrDefault(xmlFile, "helperPayrollSave.ui#debounceMs", self.settings.roleSelectorDebounceMs or 450)
 
@@ -3448,6 +3848,7 @@ function HelperPayroll:saveSavegameSettings(reason)
         return false
     end
 
+    self:pruneDailyRatePaidDays()
     local xmlFile = createXMLFile("helperPayrollSavegameSettingsWrite", path, "helperPayrollSave")
     if xmlFile == nil or xmlFile == 0 then
         rcWarn("Could not create savegame persistence file: %s", tostring(path))
@@ -3492,7 +3893,13 @@ function HelperPayroll:saveSavegameSettings(reason)
             setXMLString(xmlFile, key .. "#profile", activeProfile)
             setXMLString(xmlFile, key .. "#role", tostring(roleId))
             setXMLString(xmlFile, key .. "#name", tostring(worker.name or roleId))
-            setXMLFloat(xmlFile, key .. "#hourlyRate", tonumber(worker.hourlyRate) or 0)
+            local payBasis = string.lower(tostring(worker.payBasis or "hourly")) == "daily" and "daily" or "hourly"
+            local rate = tonumber(worker.rate)
+            if rate == nil then rate = tonumber(worker.hourlyRate) or 0 end
+            setXMLString(xmlFile, key .. "#payBasis", payBasis)
+            setXMLFloat(xmlFile, key .. "#rate", rate)
+            setXMLFloat(xmlFile, key .. "#hourlyRate", rate)
+            setXMLFloat(xmlFile, key .. "#minimumCallout", tonumber(worker.minimumCallout) or tonumber(self.settings.minimumWorkerCharge) or 0)
         end
     end
 
@@ -3512,6 +3919,10 @@ function HelperPayroll:saveSavegameSettings(reason)
         setXMLString(xmlFile, key .. "#helperName", tostring(mapping.helperName or ""))
         setXMLString(xmlFile, key .. "#roleId", tostring(mapping.roleId or mapping.workerRateId or self.settings.fallbackRole or "standard"))
         setXMLString(xmlFile, key .. "#workerRateId", tostring(mapping.workerRateId or mapping.roleId or self.settings.fallbackRole or "standard"))
+        setXMLString(xmlFile, key .. "#compensationMode", tostring(mapping.compensationMode or "inherit"))
+        setXMLString(xmlFile, key .. "#payBasis", tostring(mapping.payBasis or "hourly"))
+        setXMLFloat(xmlFile, key .. "#rate", tonumber(mapping.rate) or 0)
+        setXMLFloat(xmlFile, key .. "#minimumCallout", tonumber(mapping.minimumCallout) or 0)
     end
 
     local pendingKeys = {}
@@ -3536,11 +3947,36 @@ function HelperPayroll:saveSavegameSettings(reason)
         setXMLString(xmlFile, key .. "#helperRole", tostring(daily.helperRole or "Worker"))
         setXMLString(xmlFile, key .. "#workerId", tostring(daily.workerId or self.settings.fallbackRole or "standard"))
         setXMLFloat(xmlFile, key .. "#hourlyRate", tonumber(daily.hourlyRate) or 0)
+        setXMLString(xmlFile, key .. "#payBasis", tostring(daily.payBasis or "hourly"))
+        setXMLFloat(xmlFile, key .. "#payRate", tonumber(daily.payRate or daily.hourlyRate) or 0)
+        setXMLFloat(xmlFile, key .. "#minimumCallout", tonumber(daily.minimumCallout) or tonumber(self.settings.minimumWorkerCharge) or 0)
+        setXMLString(xmlFile, key .. "#compensationSource", tostring(daily.compensationSource or "role"))
         setXMLInt(xmlFile, key .. "#farmId", math.floor(tonumber(daily.farmId) or 1))
         setXMLInt(xmlFile, key .. "#jobs", math.floor(tonumber(daily.jobs) or 0))
         setXMLFloat(xmlFile, key .. "#hours", tonumber(daily.hours) or 0)
         setXMLFloat(xmlFile, key .. "#labour", tonumber(daily.labour) or 0)
         setXMLFloat(xmlFile, key .. "#charged", tonumber(daily.charged) or 0)
+    end
+
+
+    local paidKeys = {}
+    for key, _ in pairs(self.dailyRatePaidDays or {}) do table.insert(paidKeys, key) end
+    table.sort(paidKeys)
+    for i, paidKey in ipairs(paidKeys) do
+        local payment = self.dailyRatePaidDays[paidKey]
+        local key = string.format("helperPayrollSave.dailyRatePaid.payment(%d)", i - 1)
+        setXMLString(xmlFile, key .. "#key", tostring(payment.key or paidKey))
+        setXMLString(xmlFile, key .. "#gameDate", tostring(payment.gameDate or "unknown"))
+        if payment.workMonotonicDay ~= nil then setXMLInt(xmlFile, key .. "#workMonotonicDay", math.floor(tonumber(payment.workMonotonicDay) or 0)) end
+        setXMLString(xmlFile, key .. "#profileId", tostring(payment.profileId or self.settings.activePayrollProfile or "default"))
+        setXMLString(xmlFile, key .. "#helperSlot", tostring(payment.helperSlot or "unassigned"))
+        setXMLString(xmlFile, key .. "#helperIdentityId", tostring(payment.helperIdentityId or ""))
+        setXMLString(xmlFile, key .. "#helperName", tostring(payment.helperName or "Worker"))
+        setXMLString(xmlFile, key .. "#workerId", tostring(payment.workerId or self.settings.fallbackRole or "standard"))
+        setXMLInt(xmlFile, key .. "#farmId", math.floor(tonumber(payment.farmId) or 1))
+        setXMLFloat(xmlFile, key .. "#payRate", tonumber(payment.payRate) or 0)
+        setXMLFloat(xmlFile, key .. "#charged", tonumber(payment.charged) or 0)
+        setXMLString(xmlFile, key .. "#source", tostring(payment.source or "daily-rate"))
     end
 
     setXMLString(xmlFile, "helperPayrollSave.ui#anchor", tostring(ui.anchor or "TR"))
@@ -3902,6 +4338,10 @@ function HelperPayroll:loadPeriodLedger(periodId)
                     helperSlotUsedForPayroll = tostring(hpayXmlGetBool(xmlFile, key .. "#helperSlotUsedForPayroll", false)),
                     workerRate = hpayXmlGetString(xmlFile, key .. "#workerRate", ""),
                     rate = tostring(hpayXmlGetFloat(xmlFile, key .. "#rate", 0)),
+                    payBasis = hpayXmlGetString(xmlFile, key .. "#payBasis", "hourly"),
+                    payRate = tostring(hpayXmlGetFloat(xmlFile, key .. "#payRate", hpayXmlGetFloat(xmlFile, key .. "#rate", 0))),
+                    minimumCallout = tostring(hpayXmlGetFloat(xmlFile, key .. "#minimumCallout", hpayXmlGetFloat(xmlFile, key .. "#minimum", 0))),
+                    compensationSource = hpayXmlGetString(xmlFile, key .. "#compensationSource", "legacy"),
                     elapsedHours = tostring(hpayXmlGetFloat(xmlFile, key .. "#elapsedHours", 0)),
                     labour = tostring(hpayXmlGetFloat(xmlFile, key .. "#labour", 0)),
                     callout = tostring(hpayXmlGetFloat(xmlFile, key .. "#callout", 0)),
@@ -3938,7 +4378,7 @@ function HelperPayroll:savePeriodLedger(periodId)
     table.insert(lines, '<helperPayrollLedger' .. hpayXmlAttr("version", tostring(self.VERSION or "0.3.3.0")) .. hpayXmlAttr("period", periodId) .. hpayXmlAttr("savegame", self.persistence ~= nil and self.persistence.savegameName or "unknown") .. '>')
     for i, e in ipairs(entries or {}) do
         local attrs = ''
-        local names = {"id","entryType","status","gameDate","workMonotonicDay","workDayTime","paidMonotonicDay","paidDayTime","realDate","billingMode","payrollMode","profile","role","helper","helperSlot","helperIdentityId","helperIdentitySource","helperMappingSource","assignmentSnapshotSource","helperSlotUsedForPayroll","workerRate","rate","elapsedHours","labour","callout","minimum","minimumApplied","calculated","charged","farmId","jobType","sequence"}
+        local names = {"id","entryType","status","gameDate","workMonotonicDay","workDayTime","paidMonotonicDay","paidDayTime","realDate","billingMode","payrollMode","profile","role","helper","helperSlot","helperIdentityId","helperIdentitySource","helperMappingSource","assignmentSnapshotSource","helperSlotUsedForPayroll","workerRate","payBasis","payRate","minimumCallout","compensationSource","rate","elapsedHours","labour","callout","minimum","minimumApplied","calculated","charged","farmId","jobType","sequence"}
         for _, name in ipairs(names) do
             if e[name] ~= nil then attrs = attrs .. hpayXmlAttr(name, e[name]) end
         end
@@ -4020,7 +4460,11 @@ function HelperPayroll:buildPersistentLedgerEntryFromWorkerEntry(entry, status)
         assignmentSnapshotSource = entry.assignmentSnapshotSource,
         helperSlotUsedForPayroll = tostring(entry.helperSlotUsedForPayroll == true),
         workerRate = entry.workerId,
-        rate = string.format("%.2f", tonumber(entry.hourlyRate) or 0),
+        payBasis = self:normalisePayBasis(entry.payBasis),
+        payRate = string.format("%.2f", tonumber(entry.payRate or entry.hourlyRate) or 0),
+        minimumCallout = string.format("%.2f", tonumber(entry.minimumCallout or entry.minimumCharge) or 0),
+        compensationSource = entry.compensationSource or "role",
+        rate = string.format("%.2f", tonumber(entry.payRate or entry.hourlyRate) or 0),
         elapsedHours = string.format("%.3f", tonumber(entry.elapsedHours) or 0),
         labour = string.format("%.2f", tonumber(entry.labourCharge) or 0),
         callout = string.format("%.2f", tonumber(entry.calloutFee) or 0),
@@ -4056,11 +4500,15 @@ function HelperPayroll:recordPersistentDailyPayment(daily, charge, minimumApplie
         helperMappingSource = daily.helperMappingSource,
         helperSlotUsedForPayroll = "",
         workerRate = daily.workerId,
-        rate = string.format("%.2f", tonumber(daily.hourlyRate) or 0),
+        payBasis = self:normalisePayBasis(daily.payBasis),
+        payRate = string.format("%.2f", tonumber(daily.payRate or daily.hourlyRate) or 0),
+        minimumCallout = string.format("%.2f", tonumber(daily.minimumCallout) or 0),
+        compensationSource = daily.compensationSource or "role",
+        rate = string.format("%.2f", tonumber(daily.payRate or daily.hourlyRate) or 0),
         elapsedHours = string.format("%.3f", tonumber(daily.hours) or 0),
         labour = string.format("%.2f", tonumber(daily.labour) or 0),
-        callout = string.format("%.2f", tonumber(self.settings.workerCalloutFee) or 0),
-        minimum = string.format("%.2f", tonumber(self.settings.minimumWorkerCharge) or 0),
+        callout = string.format("%.2f", self:normalisePayBasis(daily.payBasis) == "daily" and 0 or (tonumber(self.settings.workerCalloutFee) or 0)),
+        minimum = string.format("%.2f", self:normalisePayBasis(daily.payBasis) == "daily" and 0 or (tonumber(daily.minimumCallout) or 0)),
         minimumApplied = tostring(minimumApplied == true),
         calculated = string.format("%.2f", tonumber(charge) or 0),
         charged = string.format("%.2f", tonumber(charge) or 0),
@@ -4168,6 +4616,7 @@ function HelperPayroll:buildSessionReportLines()
     local lines = {}
     local dateKey = self:getGameDateKey()
     local roleId, roleName, rate, profileId = self:getSelectedRoleInfo()
+    local selectedPolicy = self:getRoleCompensationPolicy(profileId, roleId) or {payBasis="hourly"}
 
     table.insert(lines, "HelperPayroll Report")
     table.insert(lines, string.format("Version: %s", tostring(self.VERSION or "0.3.3.0")))
@@ -4176,7 +4625,7 @@ function HelperPayroll:buildSessionReportLines()
     table.insert(lines, string.format("Payroll mode: %s", tostring(self.settings.payrollMode)))
     table.insert(lines, string.format("Billing mode: %s", tostring(self.settings.billingMode)))
     table.insert(lines, string.format("Active profile: %s", tostring(profileId)))
-    table.insert(lines, string.format("Selected role: %s (%s/hr)", tostring(roleName), hpayFormatMoney(rate)))
+    table.insert(lines, string.format("Selected role: %s (%s/%s)", tostring(roleName), hpayFormatMoney(rate), selectedPolicy.payBasis == "daily" and "day" or "hr"))
     table.insert(lines, "")
 
     local entries = tonumber(self.workerLedgerCount) or 0
@@ -4202,7 +4651,8 @@ function HelperPayroll:buildSessionReportLines()
                     calculated = 0,
                     minimums = 0,
                     callout = 0,
-                    rate = e.hourlyRate
+                    rate = e.payRate or e.hourlyRate,
+                    payBasis = e.payBasis or "hourly"
                 }
                 grouped[key] = g
                 table.insert(order, key)
@@ -4224,13 +4674,14 @@ function HelperPayroll:buildSessionReportLines()
         table.insert(lines, "By role/helper:")
         for _, key in ipairs(order) do
             local g = grouped[key]
-            table.insert(lines, string.format("- %s | role=%s | workerRate=%s | jobs=%d | hours=%.3f | rate=%s/hr | labour=%s | calculated=%s | charged=%s | minimumJobs=%d",
+            table.insert(lines, string.format("- %s | role=%s | workerRate=%s | jobs=%d | hours=%.3f | rate=%s/%s | labour=%s | calculated=%s | charged=%s | minimumJobs=%d",
                 tostring(g.helperName or "Worker"),
                 tostring(g.helperRole or "Worker"),
                 tostring(g.workerId or "unknown"),
                 tonumber(g.jobs) or 0,
                 tonumber(g.hours) or 0,
                 hpayFormatMoney(g.rate),
+                g.payBasis == "daily" and "day" or "hr",
                 hpayFormatMoney(g.labour),
                 hpayFormatMoney(g.calculated),
                 hpayFormatMoney(g.charged),
@@ -4559,9 +5010,11 @@ function HelperPayroll:hpayRole(...)
         return
     elseif a == "show" or a == "status" then
         local roleId, roleName, rate, profileId = self:getSelectedRoleInfo()
-        hpayPrintf("Selected role: profile=%s role=%s name=%s rate=%.2f payrollMode=%s",
-            tostring(profileId), tostring(roleId), tostring(roleName), tonumber(rate) or 0, tostring(self.settings.payrollMode))
-        self:showRoleMessage(string.format("Helper Payroll Role: %s (%.2f/hr)", tostring(roleName), tonumber(rate) or 0))
+        local policy = self:getRoleCompensationPolicy(profileId, roleId) or {payBasis="hourly"}
+        local unit = policy.payBasis == "daily" and "day" or "hr"
+        hpayPrintf("Selected role: profile=%s role=%s name=%s payBasis=%s rate=%.2f/%s payrollMode=%s",
+            tostring(profileId), tostring(roleId), tostring(roleName), tostring(policy.payBasis), tonumber(rate) or 0, unit, tostring(self.settings.payrollMode))
+        self:showRoleMessage(string.format("Helper Payroll Role: %s (%.2f/%s)", tostring(roleName), tonumber(rate) or 0, unit))
         return
     elseif a == "next" then
         self:selectRoleByOffset(1)
@@ -4584,9 +5037,10 @@ function HelperPayroll:hpayRole(...)
             for i, roleId in ipairs(order) do
                 local worker = self:getWorkerRateById(profileId, roleId)
                 local name = worker ~= nil and worker.name or roleId
-                local rate = worker ~= nil and tonumber(worker.hourlyRate) or 0
+                local rate = worker ~= nil and tonumber(worker.rate or worker.hourlyRate) or 0
+                local basis = worker ~= nil and self:normalisePayBasis(worker.payBasis) or "hourly"
                 local marker = tostring(roleId) == tostring(self.settings.selectedRole) and " *" or ""
-                hpayPrintf("  %02d  id=%s  name=%s  rate=%.2f%s", i, tostring(roleId), tostring(name), tonumber(rate) or 0, marker)
+                hpayPrintf("  %02d  id=%s  name=%s  payBasis=%s  rate=%.2f/%s  minimum=%.2f%s", i, tostring(roleId), tostring(name), basis, tonumber(rate) or 0, basis == "daily" and "day" or "hr", tonumber(worker ~= nil and worker.minimumCallout or 0) or 0, marker)
             end
         end
         return
@@ -4940,6 +5394,9 @@ function HelperPayroll:logRuntimeStartupStatus()
 end
 
 function HelperPayroll:processStartupStatus(dt)
+    if self.integrationAPIPublished ~= true then
+        self:publishIntegrationAPI("startup-update")
+    end
     if self.startupStatusLogged == true or self.isInitialized ~= true then
         return
     end
@@ -4981,6 +5438,7 @@ function HelperPayroll:initialize(reason)
         HelperPayrollMenu.register(self.MOD_DIRECTORY)
     end
     self.isInitialized = true
+    self:publishIntegrationAPI("initialize")
     rcLog("Initialized")
 end
 
@@ -5035,6 +5493,7 @@ function HelperPayroll:logAIPriceSuppressionSummary()
 end
 
 function HelperPayroll:deleteMap()
+    self:unpublishIntegrationAPI()
     if self.workerLedgerCount ~= nil and self.workerLedgerCount > 0 then
         rcLog("Worker ledger summary: entries=%d totalCharged=%.2f billingMode=%s", self.workerLedgerCount, tonumber(self.workerLedgerTotal) or 0, tostring(self.settings.billingMode))
         self:exportSessionReport("helperPayrollSessionReport")
