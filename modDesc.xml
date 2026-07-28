@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8" standalone="no" ?>
 <modDesc descVersion="110">
     <author>SimGamerJen</author>
-    <version>0.3.3.1</version>
+    <version>0.4.1.1</version>
     <title>
-        <en>Helper Payroll Beta</en>
+        <en>Helper Payroll Alpha</en>
     </title>
     <description>
-        <en>0.3.3.1 beta release candidate: Fixes management-menu reload/reset controls and preserves save-specific custom payroll roles, names, rates, and display order.</en>
+        <en>0.4.1.1 Alpha 2: Publishes the role-assignment API globally and on the active mission so HelperProfiles can discover it reliably. Retains the public role-assignment API for HelperProfiles while retaining hourly or daily compensation and per-worker overrides.</en>
     </description>
     <iconFilename>HelperPayroll_icon.dds</iconFilename>
     <multiplayer supported="false" />
