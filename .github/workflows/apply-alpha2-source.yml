@@ -19,36 +19,84 @@ jobs:
           ref: ${{ github.head_ref }}
           fetch-depth: 0
 
-      - name: Verify and extract Alpha 2 payload
+      - name: Apply and verify minimal Alpha 2 patch
         shell: bash
         run: |
           set -euo pipefail
-          test "$(find .bootstrap/alpha2 -maxdepth 1 -name '*.part' -type f | wc -l)" -eq 8
-          cat > /tmp/hpay-alpha2-parts.sha256 <<'EOF'
-          6d209b76f11e676300b953c8e6d1fa53d01fd92b032cb23897ee797376f7dc79  .bootstrap/alpha2/000.part
-          43f65f5b32af20b244fe1af3b5a5a7b50e1fb48d03291e226d79806ef314a47a  .bootstrap/alpha2/001.part
-          d7d15354b8e351e4c7a3c5ab5fb2a54f5424a89cf3770c4f185d46f1f35008c4  .bootstrap/alpha2/002.part
-          8d2685d29b60ddce05e394bb166d3150802bddbe49d8c492cf0576aa893ad9c1  .bootstrap/alpha2/003.part
-          3f5e327ae38825733bfb75ff8fcbd680a625114521d74345e93b8f029ece04a5  .bootstrap/alpha2/004.part
-          3fd8d192ac4d2cc2916716814f28aa2516b3dbc2090163c9e10026283d166a09  .bootstrap/alpha2/005.part
-          20620d05e4597134e3ad9795216bdfde65ae5131a3588296e45eb995aa6a810b  .bootstrap/alpha2/006.part
-          ad94d45ccf4dfd70eedf78b8638a72cf95cbd8a212040497cf1f25d253999f1e  .bootstrap/alpha2/007.part
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/HelperPayroll.lua')
+          text = path.read_text(encoding='utf-8')
+          old = 'HelperPayroll.RELEASE_CHANNEL = "alpha1"'
+          new = 'HelperPayroll.RELEASE_CHANNEL = "alpha2"'
+          if text.count(old) != 1:
+              raise SystemExit(f'Expected exactly one Alpha 1 release-channel marker, found {text.count(old)}')
+          path.write_text(text.replace(old, new), encoding='utf-8')
+          PY
+
+          cat > modDesc.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8" standalone="no" ?>
+          <modDesc descVersion="110">
+              <author>SimGamerJen</author>
+              <version>0.4.2.0</version>
+              <title>
+                  <en>Helper Payroll Alpha</en>
+              </title>
+              <description>
+                  <en>0.4.2.0 Alpha 2: Extends HelperPayroll identity, role assignment, worker overrides and job-slot detection from A-J to A-T for the twenty-helper HelperProfiles roster. Existing A-J save mappings remain compatible. Alpha 2 records the completed A-T integration tests and retains job-start snapshots when roles or appearance bindings change during active work.</en>
+              </description>
+              <iconFilename>HelperPayroll_icon.dds</iconFilename>
+              <multiplayer supported="false" />
+
+              <l10n>
+                  <text name="input_HELPERPAYROLL_CYCLE_ROLE">
+                      <en>Helper Payroll: Cycle Role</en>
+                  </text>
+                  <text name="input_HELPERPAYROLL_TOGGLE_ROLE_LIST">
+                      <en>Helper Payroll: Toggle Role List</en>
+                  </text>
+                  <text name="input_HELPERPAYROLL_TOGGLE_REPORT_OVERLAY">
+                      <en>Helper Payroll: Toggle Report Overlay</en>
+                  </text>
+                  <text name="input_HELPERPAYROLL_TOGGLE_MANAGEMENT_MENU">
+                      <en>Helper Payroll: Management Menu</en>
+                  </text>
+              </l10n>
+
+              <actions>
+                  <action name="HELPERPAYROLL_CYCLE_ROLE" category="ONFOOT VEHICLE" axisType="HALF" />
+                  <action name="HELPERPAYROLL_TOGGLE_ROLE_LIST" category="ONFOOT VEHICLE" axisType="HALF" />
+                  <action name="HELPERPAYROLL_TOGGLE_REPORT_OVERLAY" category="ONFOOT VEHICLE" axisType="HALF" />
+                  <action name="HELPERPAYROLL_TOGGLE_MANAGEMENT_MENU" category="ONFOOT VEHICLE" axisType="HALF" />
+              </actions>
+
+              <inputBinding>
+                  <actionBinding action="HELPERPAYROLL_CYCLE_ROLE">
+                      <binding device="KB_MOUSE_DEFAULT" input="KEY_semicolon" />
+                  </actionBinding>
+                  <actionBinding action="HELPERPAYROLL_TOGGLE_ROLE_LIST">
+                      <binding device="KB_MOUSE_DEFAULT" input="KEY_rctrl KEY_semicolon" />
+                  </actionBinding>
+                  <actionBinding action="HELPERPAYROLL_TOGGLE_REPORT_OVERLAY">
+                      <binding device="KB_MOUSE_DEFAULT" input="KEY_rctrl KEY_p" />
+                  </actionBinding>
+                  <actionBinding action="HELPERPAYROLL_TOGGLE_MANAGEMENT_MENU">
+                      <binding device="KB_MOUSE_DEFAULT" input="KEY_rctrl KEY_h" />
+                  </actionBinding>
+              </inputBinding>
+
+              <extraSourceFiles>
+                  <sourceFile filename="scripts/gui/HelperPayrollMenu.lua" />
+                  <sourceFile filename="scripts/HelperPayroll.lua" />
+              </extraSourceFiles>
+          </modDesc>
           EOF
-          sed -i 's/^          //' /tmp/hpay-alpha2-parts.sha256
-          sha256sum -c /tmp/hpay-alpha2-parts.sha256
+          sed -i 's/^          //' modDesc.xml
 
-          cat .bootstrap/alpha2/*.part | base64 --decode > /tmp/hpay-alpha2.tar.xz
-          echo '3b4eb9f1b44ae8a1715a5e9ee33eb7b3b3ba3ea480bdd7f17ae2ceaf287af401  /tmp/hpay-alpha2.tar.xz' | sha256sum -c -
-          test "$(tar -tJf /tmp/hpay-alpha2.tar.xz | wc -l)" -eq 2
-          tar -xJf /tmp/hpay-alpha2.tar.xz
+          rm -rf .bootstrap
 
-          cat > /tmp/hpay-alpha2.sha256 <<'EOF'
-          705de3d38051b3e5f5265798dc9361e3dc4c1febbe4407832b1edb1f7c7212a3  modDesc.xml
-          c594ed2f3a483f8b4d3fd878053f2d4c5268832af473e2937c9a88447346cfb0  scripts/HelperPayroll.lua
-          EOF
-          sed -i 's/^          //' /tmp/hpay-alpha2.sha256
-          sha256sum -c /tmp/hpay-alpha2.sha256
-
+          echo '705de3d38051b3e5f5265798dc9361e3dc4c1febbe4407832b1edb1f7c7212a3  modDesc.xml' | sha256sum -c -
+          echo 'c594ed2f3a483f8b4d3fd878053f2d4c5268832af473e2937c9a88447346cfb0  scripts/HelperPayroll.lua' | sha256sum -c -
           grep -q 'RELEASE_CHANNEL = "alpha2"' scripts/HelperPayroll.lua
           grep -q 'Alpha 2' modDesc.xml
           grep -q '<version>0.4.2.0</version>' modDesc.xml
@@ -57,7 +105,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf .bootstrap
           rm -f .github/workflows/apply-alpha2-source.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
