@@ -1,5 +1,5 @@
 -- Helper Payroll
--- Version: 0.4.2.0-alpha1
+-- Version: 0.4.2.0-alpha2
 -- Purpose:
 --   1. Suppress vanilla AI worker payments.
 --   2. Track active AI jobs.
@@ -15,7 +15,7 @@ local hpGetTimeMs
 HelperPayroll = {}
 HelperPayroll.MOD_NAME = g_currentModName or "FS25_HelperPayroll"
 HelperPayroll.VERSION = "0.4.2.0"
-HelperPayroll.RELEASE_CHANNEL = "alpha1"
+HelperPayroll.RELEASE_CHANNEL = "alpha2"
 HelperPayroll.TARGET_HELPER_SLOTS = 20
 HelperPayroll.MOD_DIRECTORY = g_currentModDirectory or ""
 HelperPayroll.BUNDLED_CONFIG_FILE = HelperPayroll.MOD_DIRECTORY .. "config/defaultPayrollConfig.xml"
