@@ -34,64 +34,10 @@ jobs:
           path.write_text(text.replace(old, new), encoding='utf-8')
           PY
 
-          cat > modDesc.xml <<'EOF'
-          <?xml version="1.0" encoding="utf-8" standalone="no" ?>
-          <modDesc descVersion="110">
-              <author>SimGamerJen</author>
-              <version>0.4.2.0</version>
-              <title>
-                  <en>Helper Payroll Alpha</en>
-              </title>
-              <description>
-                  <en>0.4.2.0 Alpha 2: Extends HelperPayroll identity, role assignment, worker overrides and job-slot detection from A-J to A-T for the twenty-helper HelperProfiles roster. Existing A-J save mappings remain compatible. Alpha 2 records the completed A-T integration tests and retains job-start snapshots when roles or appearance bindings change during active work.</en>
-              </description>
-              <iconFilename>HelperPayroll_icon.dds</iconFilename>
-              <multiplayer supported="false" />
-
-              <l10n>
-                  <text name="input_HELPERPAYROLL_CYCLE_ROLE">
-                      <en>Helper Payroll: Cycle Role</en>
-                  </text>
-                  <text name="input_HELPERPAYROLL_TOGGLE_ROLE_LIST">
-                      <en>Helper Payroll: Toggle Role List</en>
-                  </text>
-                  <text name="input_HELPERPAYROLL_TOGGLE_REPORT_OVERLAY">
-                      <en>Helper Payroll: Toggle Report Overlay</en>
-                  </text>
-                  <text name="input_HELPERPAYROLL_TOGGLE_MANAGEMENT_MENU">
-                      <en>Helper Payroll: Management Menu</en>
-                  </text>
-              </l10n>
-
-              <actions>
-                  <action name="HELPERPAYROLL_CYCLE_ROLE" category="ONFOOT VEHICLE" axisType="HALF" />
-                  <action name="HELPERPAYROLL_TOGGLE_ROLE_LIST" category="ONFOOT VEHICLE" axisType="HALF" />
-                  <action name="HELPERPAYROLL_TOGGLE_REPORT_OVERLAY" category="ONFOOT VEHICLE" axisType="HALF" />
-                  <action name="HELPERPAYROLL_TOGGLE_MANAGEMENT_MENU" category="ONFOOT VEHICLE" axisType="HALF" />
-              </actions>
-
-              <inputBinding>
-                  <actionBinding action="HELPERPAYROLL_CYCLE_ROLE">
-                      <binding device="KB_MOUSE_DEFAULT" input="KEY_semicolon" />
-                  </actionBinding>
-                  <actionBinding action="HELPERPAYROLL_TOGGLE_ROLE_LIST">
-                      <binding device="KB_MOUSE_DEFAULT" input="KEY_rctrl KEY_semicolon" />
-                  </actionBinding>
-                  <actionBinding action="HELPERPAYROLL_TOGGLE_REPORT_OVERLAY">
-                      <binding device="KB_MOUSE_DEFAULT" input="KEY_rctrl KEY_p" />
-                  </actionBinding>
-                  <actionBinding action="HELPERPAYROLL_TOGGLE_MANAGEMENT_MENU">
-                      <binding device="KB_MOUSE_DEFAULT" input="KEY_rctrl KEY_h" />
-                  </actionBinding>
-              </inputBinding>
-
-              <extraSourceFiles>
-                  <sourceFile filename="scripts/gui/HelperPayrollMenu.lua" />
-                  <sourceFile filename="scripts/HelperPayroll.lua" />
-              </extraSourceFiles>
-          </modDesc>
+          cat > /tmp/hpay-moddesc.b64 <<'EOF'
+          PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiIHN0YW5kYWxvbmU9Im5vIiA/Pgo8bW9kRGVzYyBkZXNjVmVyc2lvbj0iMTEwIj4KICAgIDxhdXRob3I+U2ltR2FtZXJKZW48L2F1dGhvcj4KICAgIDx2ZXJzaW9uPjAuNC4yLjA8L3ZlcnNpb24+CiAgICA8dGl0bGU+CiAgICAgICAgPGVuPkhlbHBlciBQYXlyb2xsIEFscGhhPC9lbj4KICAgIDwvdGl0bGU+CiAgICA8ZGVzY3JpcHRpb24+CiAgICAgICAgPGVuPjAuNC4yLjAgQWxwaGEgMjogRXh0ZW5kcyBIZWxwZXJQYXlyb2xsIGlkZW50aXR5LCByb2xlIGFzc2lnbm1lbnQsIHdvcmtlciBvdmVycmlkZXMgYW5kIGpvYi1zbG90IGRldGVjdGlvbiBmcm9tIEEtSiB0byBBLVQgZm9yIHRoZSB0d2VudHktaGVscGVyIEhlbHBlclByb2ZpbGVzIHJvc3Rlci4gRXhpc3RpbmcgQS1KIHNhdmUgbWFwcGluZ3MgcmVtYWluIGNvbXBhdGlibGUuIEFscGhhIDIgcmVjb3JkcyB0aGUgY29tcGxldGVkIEEtVCBpbnRlZ3JhdGlvbiB0ZXN0cyBhbmQgcmV0YWlucyBqb2Itc3RhcnQgc25hcHNob3RzIHdoZW4gcm9sZXMgb3IgYXBwZWFyYW5jZSBiaW5kaW5ncyBjaGFuZ2UgZHVyaW5nIGFjdGl2ZSB3b3JrLjwvZW4+CiAgICA8L2Rlc2NyaXB0aW9uPgogICAgPGljb25GaWxlbmFtZT5IZWxwZXJQYXlyb2xsX2ljb24uZGRzPC9pY29uRmlsZW5hbWU+CiAgICA8bXVsdGlwbGF5ZXIgc3VwcG9ydGVkPSJmYWxzZSIgLz4KCiAgICA8bDEwbj4KICAgICAgICA8dGV4dCBuYW1lPSJpbnB1dF9IRUxQRVJQQVlST0xMX0NZQ0xFX1JPTEUiPgogICAgICAgICAgICA8ZW4+SGVscGVyIFBheXJvbGw6IEN5Y2xlIFJvbGU8L2VuPgogICAgICAgIDwvdGV4dD4KICAgICAgICA8dGV4dCBuYW1lPSJpbnB1dF9IRUxQRVJQQVlST0xMX1RPR0dMRV9ST0xFX0xJU1QiPgogICAgICAgICAgICA8ZW4+SGVscGVyIFBheXJvbGw6IFRvZ2dsZSBSb2xlIExpc3Q8L2VuPgogICAgICAgIDwvdGV4dD4KICAgICAgICA8dGV4dCBuYW1lPSJpbnB1dF9IRUxQRVJQQVlST0xMX1RPR0dMRV9SRVBPUlRfT1ZFUkxBWSI+CiAgICAgICAgICAgIDxlbj5IZWxwZXIgUGF5cm9sbDogVG9nZ2xlIFJlcG9ydCBPdmVybGF5PC9lbj4KICAgICAgICA8L3RleHQ+CiAgICAgICAgPHRleHQgbmFtZT0iaW5wdXRfSEVMUEVSUEFZUk9MTF9UT0dHTEVfTUFOQUdFTUVOVF9NRU5VIj4KICAgICAgICAgICAgPGVuPkhlbHBlciBQYXlyb2xsOiBNYW5hZ2VtZW50IE1lbnU8L2VuPgogICAgICAgIDwvdGV4dD4KICAgIDwvbDEwbj4KCiAgICA8YWN0aW9ucz4KICAgICAgICA8YWN0aW9uIG5hbWU9IkhFTFBFUlBBWVJPTExfQ1lDTEVfUk9MRSIgY2F0ZWdvcnk9Ik9ORk9PVCBWRUhJQ0xFIiBheGlzVHlwZT0iSEFMRiIgLz4KICAgICAgICA8YWN0aW9uIG5hbWU9IkhFTFBFUlBBWVJPTExfVE9HR0xFX1JPTEVfTElTVCIgY2F0ZWdvcnk9Ik9ORk9PVCBWRUhJQ0xFIiBheGlzVHlwZT0iSEFMRiIgLz4KICAgICAgICA8YWN0aW9uIG5hbWU9IkhFTFBFUlBBWVJPTExfVE9HR0xFX1JFUE9SVF9PVkVSTEFZIiBjYXRlZ29yeT0iT05GT09UIFZFSElDTEUiIGF4aXNUeXBlPSJIQUxGIiAvPgogICAgICAgIDxhY3Rpb24gbmFtZT0iSEVMUEVSUEFZUk9MTF9UT0dHTEVfTUFOQUdFTUVOVF9NRU5VIiBjYXRlZ29yeT0iT05GT09UIFZFSElDTEUiIGF4aXNUeXBlPSJIQUxGIiAvPgogICAgPC9hY3Rpb25zPgoKICAgIDxpbnB1dEJpbmRpbmc+CiAgICAgICAgPGFjdGlvbkJpbmRpbmcgYWN0aW9uPSJIRUxQRVJQQVlST0xMX0NZQ0xFX1JPTEUiPgogICAgICAgICAgICA8YmluZGluZyBkZXZpY2U9IktCX01PVVNFX0RFRkFVTFQiIGlucHV0PSJLRVlfc2VtaWNvbG9uIiAvPgogICAgICAgIDwvYWN0aW9uQmluZGluZz4KICAgICAgICA8YWN0aW9uQmluZGluZyBhY3Rpb249IkhFTFBFUlBBWVJPTExfVE9HR0xFX1JPTEVfTElTVCI+CiAgICAgICAgICAgIDxiaW5kaW5nIGRldmljZT0iS0JfTU9VU0VfREVGQVVMVCIgaW5wdXQ9IktFWV9yY3RybCBLRVlfc2VtaWNvbG9uIiAvPgogICAgICAgIDwvYWN0aW9uQmluZGluZz4KICAgICAgICA8YWN0aW9uQmluZGluZyBhY3Rpb249IkhFTFBFUlBBWVJPTExfVE9HR0xFX1JFUE9SVF9PVkVSTEFZIj4KICAgICAgICAgICAgPGJpbmRpbmcgZGV2aWNlPSJLQl9NT1VTRV9ERUZBVUxUIiBpbnB1dD0iS0VZX3JjdHJsIEtFWV9wIiAvPgogICAgICAgIDwvYWN0aW9uQmluZGluZz4KICAgICAgICA8YWN0aW9uQmluZGluZyBhY3Rpb249IkhFTFBFUlBBWVJPTExfVE9HR0xFX01BTkFHRU1FTlRfTUVOVSI+CiAgICAgICAgICAgIDxiaW5kaW5nIGRldmljZT0iS0JfTU9VU0VfREVGQVVMVCIgaW5wdXQ9IktFWV9yY3RybCBLRVlfaCIgLz4KICAgICAgICA8L2FjdGlvbkJpbmRpbmc+CiAgICA8L2lucHV0QmluZGluZz4KCiAgICA8ZXh0cmFTb3VyY2VGaWxlcz4KICAgICAgICA8c291cmNlRmlsZSBmaWxlbmFtZT0ic2NyaXB0cy9ndWkvSGVscGVyUGF5cm9sbE1lbnUubHVhIiAvPgogICAgICAgIDxzb3VyY2VGaWxlIGZpbGVuYW1lPSJzY3JpcHRzL0hlbHBlclBheXJvbGwubHVhIiAvPgogICAgPC9leHRyYVNvdXJjZUZpbGVzPgo8L21vZERlc2M+Cg==
           EOF
-          sed -i 's/^          //' modDesc.xml
+          tr -d '[:space:]' < /tmp/hpay-moddesc.b64 | base64 --decode > modDesc.xml
 
           rm -rf .bootstrap
 
