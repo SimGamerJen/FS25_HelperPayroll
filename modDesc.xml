@@ -6,7 +6,7 @@
         <en>Helper Payroll Alpha</en>
     </title>
     <description>
-        <en>0.4.2.0 Alpha 1: Extends HelperPayroll identity, role assignment, worker overrides and job-slot detection from A-J to A-T for the twenty-helper HelperProfiles roster. Existing A-J save mappings remain compatible.</en>
+        <en>0.4.2.0 Alpha 2: Extends HelperPayroll identity, role assignment, worker overrides and job-slot detection from A-J to A-T for the twenty-helper HelperProfiles roster. Existing A-J save mappings remain compatible. Alpha 2 records the completed A-T integration tests and retains job-start snapshots when roles or appearance bindings change during active work.</en>
     </description>
     <iconFilename>HelperPayroll_icon.dds</iconFilename>
     <multiplayer supported="false" />
