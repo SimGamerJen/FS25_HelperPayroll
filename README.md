@@ -4,7 +4,7 @@
 
 It supports role-based and named-worker compensation, hourly or daily pay, per-role minimum call-outs, per-worker overrides, immediate or scheduled settlement, persistent ledger reporting, and optional integration with HelperProfiles.
 
-> **Current version:** `0.4.1.1` Alpha 2  
+> **Current version:** `0.4.2.0` Alpha 2  
 > **Game:** Farming Simulator 25  
 > **Multiplayer:** Not supported
 
@@ -13,16 +13,18 @@ It supports role-based and named-worker compensation, hourly or daily pay, per-r
 - Suppresses the game's normal continuous AI-worker wage deductions.
 - Calculates custom worker charges from configurable payroll policies.
 - Supports `roleType` and `helperSlot` payroll modes.
+- Supports helper slots **A–T** when used with the twenty-worker HelperProfiles roster.
+- Accepts canonical identities `helper01` through `helper20` and legacy slot identities.
 - Supports hourly and daily compensation independently of payment timing.
 - Configures pay basis, rate, and minimum call-out for each role.
 - Allows each worker to inherit role terms or use a custom override.
 - Supports immediate `onJobFinish` settlement or scheduled `dailyPayroll`.
 - Supports a global call-out fee and optional charge rounding.
 - Stores settings, role policies, worker mappings, and pending payroll per savegame.
-- Captures worker and compensation terms when a job starts.
+- Captures worker identity, role, and compensation terms when a job starts.
 - Records persistent payroll history by period, role, worker, and job.
 - Provides an FS25-style management screen, overlays, reports, and console tools.
-- Publishes an optional API used by HelperProfiles for role assignment and display.
+- Publishes an optional API used by HelperProfiles for read-only role display.
 
 ## Installation
 
@@ -34,7 +36,7 @@ Documents/My Games/FarmingSimulator2025/mods
 ```
 
 3. Enable **Helper Payroll Alpha** for the intended savegame.
-4. Optionally enable [FS25 HelperProfiles](https://github.com/SimGamerJen/FS25_HelperProfiles) for named helper identities, in-game profile role assignment, and the HelperProfiles overlay role column.
+4. Optionally enable [FS25 HelperProfiles](https://github.com/SimGamerJen/FS25_HelperProfiles) for stable A–T helper identities, named workers, and the HelperProfiles overlay role column.
 
 Alpha builds should be tested on a copied savegame before being used in an important playthrough.
 
@@ -76,12 +78,15 @@ Every new AI job uses the currently selected payroll role. The selected role and
 
 ### `helperSlot`
 
-Assigns roles to the deployed helper slot A–J.
+Assigns roles to individual deployed helper slots.
 
-- Works with slot fallbacks when HelperProfiles is absent.
-- Uses live display names and stable identities when the HelperProfiles API is available.
+- Supports A–T with HelperProfiles `2.1.0.0` or a compatible later build.
+- Retains the existing standalone fallback when HelperProfiles is absent.
+- Uses live display names and stable canonical identities when the HelperProfiles API is available.
 - Stores identity and slot mappings in the current save.
 - Supports separate custom compensation overrides for each worker.
+
+Use the **Workers** tab in the HelperPayroll management screen to assign roles and compensation policies. HelperProfiles does not edit payroll data.
 
 ## Compensation Policies
 
@@ -116,12 +121,25 @@ Each role defines:
 
 ### Worker override
 
-Each A–J worker can use:
+Each managed worker can use:
 
 - `inherit`: uses the assigned role policy
 - `custom`: uses the worker's own pay basis, rate, and minimum call-out
 
-This allows a role to be hourly by default while one named worker is paid a fixed daily amount.
+With the twenty-slot HelperProfiles integration, the Workers tab supports A–T. This allows a role to be hourly by default while one named worker is paid a fixed daily amount.
+
+## Job-Start Snapshot Behaviour
+
+When a job starts, HelperPayroll captures the worker's:
+
+- helper slot;
+- canonical identity when available;
+- display name;
+- assigned role;
+- pay basis, rate, and minimum call-out;
+- mapping and compensation source.
+
+Those values remain attached to the active job. Changing a worker's role or HelperProfiles appearance binding while the worker is active does not retroactively alter the ledger entry or charge for that job. The new assignment applies to later jobs.
 
 ## Billing Modes
 
@@ -158,7 +176,7 @@ The screen contains six tabs:
 | **Overview** | Shows active profile, modes, selected role, integration status, pending payroll, and save path. |
 | **Billing** | Edits payroll mode, billing mode, payroll hour, legacy minimum, global call-out fee, and rounding. |
 | **Roles** | Edits each role's pay basis, rate, and minimum call-out. |
-| **Workers** | Assigns roles and configures inherited or custom worker compensation. |
+| **Workers** | Assigns roles and configures inherited or custom worker compensation for the managed roster. |
 | **Ledger** | Displays persistent payroll totals. |
 | **Help** | Explains assignment, compensation, and settlement. |
 
@@ -176,20 +194,19 @@ Resetting a save does not overwrite the global `defaultPayrollConfig.xml`.
 
 HelperProfiles is optional and is not a hard dependency.
 
-HelperPayroll `0.4.1.1` publishes its role-assignment API globally and on the active mission so HelperProfiles can discover it reliably regardless of mod load order.
+HelperPayroll `0.4.2.0` supports the twenty-slot HelperProfiles API and publishes its own role-assignment API globally and on the active mission.
 
-With HelperProfiles `2.0.27.2` or a compatible later build:
+With HelperProfiles `2.1.0.0` or a compatible later build:
 
-- HelperProfiles supplies stable helper identities and display names.
+- HelperProfiles supplies stable helper identities `helper01` through `helper20` and live display names.
 - HelperPayroll supplies ordered role definitions and effective role mappings.
-- Roles can be assigned from the HelperProfiles Profiles screen.
-- Set payroll mode to `helperSlot` for those individual assignments to control payroll calculations; `roleType` continues to use the globally selected role.
-- The HelperProfiles overlay displays a live **ROLE** column.
-- Assignments are stored by stable identity where possible, with A–J slot fallback.
+- HelperPayroll manages role assignments from its own **Workers** tab.
+- Set payroll mode to `helperSlot` for individual A–T worker assignments to control payroll calculations.
+- `roleType` continues to use the globally selected role.
+- The HelperProfiles overlay displays a read-only **ROLE** column.
+- Assignments are stored by stable identity where possible, with A–T slot fallback.
 - Worker identities and roles are included in payroll reports and ledger entries.
-- HelperPayroll remains responsible for all compensation rules and persistence.
-
-Changing a role while a job is already active does not retroactively alter the terms captured for that job.
+- HelperPayroll remains responsible for compensation rules, worker overrides, settlement, and persistence.
 
 Check integration status with:
 
@@ -199,6 +216,10 @@ hpayProfiles slots
 ```
 
 HelperPayroll remains usable in standalone `roleType` mode when HelperProfiles is absent.
+
+### Hired Helper Tool note
+
+HelperProfiles and Hired Helper Tool are explicitly incompatible because both own the helper roster. When HelperProfiles disables itself due to that conflict, its shared identity API is intentionally unavailable to HelperPayroll. HelperPayroll remains responsible only for its own payroll behaviour and does not treat Hired Helper Tool's roster as a HelperProfiles A–T roster.
 
 ## Configuration and Save Data
 
@@ -338,6 +359,10 @@ Role IDs must be unique and non-empty. Save-specific role definitions are preser
                 name="Helper A"
                 role="Standard Helper"
                 workerRate="standard" />
+        <helper slot="T"
+                name="Helper T"
+                role="Contractor"
+                workerRate="contractor" />
     </helperSlots>
 </helperPayroll>
 ```
@@ -446,7 +471,7 @@ hpayReport daily
 
 Rows from an earlier game day should be treated as overdue and settle automatically.
 
-### HelperProfiles roles are missing
+### A–T workers or HelperProfiles identities are missing
 
 Run:
 
@@ -455,21 +480,32 @@ hpayProfiles status
 hpayProfiles slots
 ```
 
-Confirm that HelperProfiles `2.0.27.2` or a compatible later build is enabled, only one copy of each mod ZIP exists, the game was restarted after replacing either mod, and the HelperPayroll API publication appears in `log.txt`.
+Confirm that HelperProfiles `2.1.0.0` or a compatible later build is enabled, only one copy of each mod ZIP exists, and the game was fully restarted after replacing either mod.
+
+Role assignments are edited in the HelperPayroll **Workers** tab. The HelperProfiles binding screen is for AvatarSwitcher appearances only.
 
 ### Requesting support
 
 Include the HelperPayroll version, HelperProfiles version when installed, relevant `log.txt` excerpt, savegame number, active modes, and clear reproduction steps.
 
-## Version 0.4.1.1 Alpha 2
+## Version History
 
-- Publishes the role-assignment API globally and on the active mission.
-- Allows HelperProfiles to discover the API reliably regardless of load order.
-- Supplies ordered role definitions and effective identity/slot mappings.
-- Accepts validated save-specific role changes through `setWorkerRole`.
-- Retains hourly and daily role policies.
-- Retains inherited or custom per-worker compensation.
-- Preserves active-job compensation capture and persistent ledger behaviour.
+### Version 0.4.2.0 Alpha 2
+
+- Extended helper-slot handling from A–J to A–T.
+- Added canonical `helper01` through `helper20` identity support.
+- Extended role mappings, worker overrides, job-slot detection, and the Workers screen to 20 slots.
+- Added default mappings for K–T.
+- Updated HelperProfiles API discovery and twenty-slot integration.
+- Retained job-start role, identity, and compensation snapshots.
+- Kept all payroll editing within the HelperPayroll management UI.
+
+### Version 0.4.1.1 Alpha 2
+
+- Published the role-assignment API globally and on the active mission.
+- Allowed HelperProfiles to discover the API reliably regardless of load order.
+- Supplied ordered role definitions and effective identity/slot mappings.
+- Retained hourly and daily role policies, worker overrides, and persistent ledger behaviour.
 
 ## Development Status
 
@@ -478,7 +514,6 @@ This is an alpha integration build.
 Planned work includes:
 
 - Add, rename, reorder, and delete role controls in the management UI.
-- Expanded helper-roster support beyond A–J in coordination with HelperProfiles.
 - Optional rostered-day policies distinct from worked-day daily compensation.
 - Continued reporting, localisation, and usability improvements.
 
