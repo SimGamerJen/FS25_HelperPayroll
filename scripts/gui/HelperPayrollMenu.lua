@@ -174,8 +174,7 @@ function HelperPayrollMenu:refreshDraftFromRuntime()
         end
     end
     if hp ~= nil then
-        for index = 1, 10 do
-            local slot = string.char(string.byte("A") + index - 1)
+        for _, slot in ipairs(hp:getManagedHelperSlots()) do
             local slotInfo = hp.getHelperProfilesSlotInfo ~= nil and hp:getHelperProfilesSlotInfo(slot) or nil
             local roleId = hp.getEffectiveHelperProfilesRole ~= nil and select(1, hp:getEffectiveHelperProfilesRole(slotInfo, slot, profileId)) or (hp.settings.fallbackRole or "standard")
             self.draftMappings[slot] = roleId
@@ -254,7 +253,7 @@ function HelperPayrollMenu:buildRows()
 
     if topic == "billing" then
         rows = {
-            {id="payrollMode", label="Payroll mode", value=tostring(self.draftSettings.payrollMode or "roleType"), status="Editable", source="Savegame", editType="option", options={"roleType", "helperSlot"}, info="roleType assigns every new job to the selected payroll role. helperSlot uses the deployed A-J worker, with live HelperProfiles identity data when available."},
+            {id="payrollMode", label="Payroll mode", value=tostring(self.draftSettings.payrollMode or "roleType"), status="Editable", source="Savegame", editType="option", options={"roleType", "helperSlot"}, info="roleType assigns every new job to the selected payroll role. helperSlot uses the deployed A-T worker, with live HelperProfiles identity data when available."},
             {id="billingMode", label="Billing mode", value=tostring(self.draftSettings.billingMode or "onJobFinish"), status="Editable", source="Savegame", editType="option", options={"onJobFinish", "dailyPayroll"}, info="onJobFinish charges each completed job immediately. dailyPayroll aggregates each worker's completed work for the game day and settles it through payroll."},
             {id="payrollHour", label="Payroll hour", value=fmtHour(self.draftSettings.payrollHour), status="Editable", source="Savegame", editType="number", step=1, min=0, max=23, info="In dailyPayroll mode, pending rows settle at this in-game hour. Any unpaid row from an earlier game day is treated as overdue and settles automatically."},
             {id="minimumWorkerCharge", label="Legacy minimum", value=fmtMoney(self.draftSettings.minimumWorkerCharge), status="Editable", source="Savegame", editType="number", step=0.5, min=0, max=999, info="Compatibility fallback for old save data that has no per-role minimum. New payroll policies use the minimum call-out configured on each role or worker."},
@@ -277,8 +276,7 @@ function HelperPayrollMenu:buildRows()
         if roleOrder == nil or #roleOrder == 0 then
             roleOrder = {tostring(hp ~= nil and hp.settings ~= nil and hp.settings.fallbackRole or "standard")}
         end
-        for index = 1, 10 do
-            local slot = string.char(string.byte("A") + index - 1)
+        for _, slot in ipairs(hp:getManagedHelperSlots()) do
             local slotInfo = hp ~= nil and hp.getHelperProfilesSlotInfo ~= nil and hp:getHelperProfilesSlotInfo(slot) or nil
             local displayName = slotInfo ~= nil and slotInfo.displayName or ("Helper " .. slot)
             local identityId = slotInfo ~= nil and slotInfo.identityId or ("slot:" .. slot)
@@ -350,7 +348,7 @@ function HelperPayrollMenu:buildBodyText()
         end
         return string.format("Profile: %s\nPayroll mode: %s\nPayment schedule: %s\nSelected role: %s (%.2f/%s)\nGlobal callout fee: %.2f\nHelperProfiles: %s\nPending payroll rows: %d\nCurrent-save settings: %s\n\nUse BILLING for payment timing, ROLES for default compensation, WORKERS for named-worker overrides, and LEDGER for accumulated history.", tostring(hp and hp.settings and hp.settings.activePayrollProfile or "-"), tostring(hp and hp.settings and hp.settings.payrollMode or "-"), tostring(hp and hp.settings and hp.settings.billingMode or "-"), tostring(roleName), tonumber(rate) or 0, roleBasis == "daily" and "day" or "hr", tonumber(hp and hp.settings and hp.settings.workerCalloutFee or 0) or 0, tostring(integration), tonumber(pendingRows) or 0, tostring(hp and hp.persistence and hp.persistence.filePath or "-"))
     elseif topic == "help" then
-        return "HelperPayroll Management\n\nChanges are staged until APPLY is pressed. APPLY writes gameplay settings to the current save only; it does not overwrite the global default policy. DISCARD restores the currently loaded values.\n\nROLES defines the default pay basis, rate, and hourly minimum call-out. WORKERS can inherit those settings or override all three for a named A-J worker.\n\nHourly pay is hours multiplied by rate, subject to the minimum call-out. Daily pay is charged once per worker per game day when that worker completes work. Payment schedule is separate: onJobFinish settles immediately, while dailyPayroll settles at the configured payroll hour."
+        return "HelperPayroll Management\n\nChanges are staged until APPLY is pressed. APPLY writes gameplay settings to the current save only; it does not overwrite the global default policy. DISCARD restores the currently loaded values.\n\nROLES defines the default pay basis, rate, and hourly minimum call-out. WORKERS can inherit those settings or override all three for a named A-T worker.\n\nHourly pay is hours multiplied by rate, subject to the minimum call-out. Daily pay is charged once per worker per game day when that worker completes work. Payment schedule is separate: onJobFinish settles immediately, while dailyPayroll settles at the configured payroll hour."
     end
     return ""
 end
