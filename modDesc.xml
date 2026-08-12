@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8" standalone="no" ?>
 <modDesc descVersion="110">
     <author>SimGamerJen</author>
-    <version>0.4.2.0</version>
+    <version>0.4.3.0</version>
     <title>
         <en>Helper Payroll Alpha</en>
     </title>
     <description>
-        <en>0.4.2.0 Alpha 2: Extends HelperPayroll identity, role assignment, worker overrides and job-slot detection from A-J to A-T for the twenty-helper HelperProfiles roster. Existing A-J save mappings remain compatible. Alpha 2 records the completed A-T integration tests and retains job-start snapshots when roles or appearance bindings change during active work.</en>
+        <en>0.4.3.0 Alpha 2: Adds HelperProfiles roster-aware payroll management. The Workers tab now shows ON-roster workers only while preserving OFF workers' roles, compensation overrides and ledger identities. Payroll snapshots and the public API now expose roster availability and enabled/disabled counts. Also includes the Alpha 1 live dashboard, WorkerCosts compatibility protection and future multiplayer-ready state boundaries; multiplayer remains disabled.</en>
     </description>
     <iconFilename>HelperPayroll_icon.dds</iconFilename>
     <multiplayer supported="false" />
@@ -49,6 +49,10 @@
     </inputBinding>
 
     <extraSourceFiles>
+        <sourceFile filename="scripts/HelperPayrollCompatibility.lua" />
+        <sourceFile filename="scripts/HelperPayrollFarmScope.lua" />
+        <sourceFile filename="scripts/HelperPayrollSnapshot.lua" />
+        <sourceFile filename="scripts/HelperPayrollPublicAPI.lua" />
         <sourceFile filename="scripts/gui/HelperPayrollMenu.lua" />
         <sourceFile filename="scripts/HelperPayroll.lua" />
     </extraSourceFiles>

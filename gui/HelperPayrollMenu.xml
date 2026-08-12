@@ -12,7 +12,7 @@
         </GuiElement>
 
         <BoxLayout profile="fs25_subCategorySelectorTabbedBox" id="subCategoryBox">
-            <Button profile="fs25_subCategorySelectorTabbedTab" id="subCategoryTabs[1]" text="OVERVIEW" onClick="onClickOverview"><ThreePartBitmap profile="fs25_subCategorySelectorTabbedTabBg" name="background"/></Button>
+            <Button profile="fs25_subCategorySelectorTabbedTab" id="subCategoryTabs[1]" text="DASHBOARD" onClick="onClickDashboard"><ThreePartBitmap profile="fs25_subCategorySelectorTabbedTabBg" name="background"/></Button>
             <Button profile="fs25_subCategorySelectorTabbedTab" id="subCategoryTabs[2]" text="BILLING" onClick="onClickBilling"><ThreePartBitmap profile="fs25_subCategorySelectorTabbedTabBg" name="background"/></Button>
             <Button profile="fs25_subCategorySelectorTabbedTab" id="subCategoryTabs[3]" text="ROLES" onClick="onClickRoles"><ThreePartBitmap profile="fs25_subCategorySelectorTabbedTabBg" name="background"/></Button>
             <Button profile="fs25_subCategorySelectorTabbedTab" id="subCategoryTabs[4]" text="WORKERS" onClick="onClickWorkers"><ThreePartBitmap profile="fs25_subCategorySelectorTabbedTabBg" name="background"/></Button>
