@@ -5,7 +5,7 @@
 -- server-to-client transport without changing consumers.
 
 HelperPayrollSnapshot = HelperPayrollSnapshot or {}
-HelperPayrollSnapshot.SCHEMA_VERSION = 2
+HelperPayrollSnapshot.SCHEMA_VERSION = 3
 
 local function round(value, places)
     local n = tonumber(value) or 0
@@ -64,10 +64,15 @@ end
 
 local function buildActiveJobs(owner)
     local jobs = {}
-    for _, tracked in pairs(owner.trackedAIJobs or {}) do
+
+    local function appendTracked(tracked, source)
+        if tracked == nil then return end
         local estimate, labour, elapsedHours, assignment, payBasis, payRate = estimateTrackedCharge(owner, tracked)
         table.insert(jobs, {
             sequence = tonumber(tracked.sequence) or 0,
+            source = tostring(source or (tracked.external == true and "external" or "giants-ai")),
+            controller = tracked.controller ~= nil and tostring(tracked.controller) or (assignment.externalController ~= nil and tostring(assignment.externalController) or nil),
+            sessionId = tracked.sessionId ~= nil and tostring(tracked.sessionId) or (assignment.externalSessionId ~= nil and tostring(assignment.externalSessionId) or nil),
             jobType = tostring(tracked.name or "AI job"),
             helperSlot = assignment.helperSlot,
             helperIdentityId = assignment.helperIdentityId,
@@ -82,9 +87,21 @@ local function buildActiveJobs(owner)
             farmId = tonumber(assignment.farmId) or assignment.farmId,
             farmIdSource = tostring(assignment.farmIdSource or "unknown"),
             gameDate = assignment.gameDate,
-            snapshotSource = tostring(assignment.snapshotSource or "runtime")
+            snapshotSource = tostring(assignment.snapshotSource or "runtime"),
+            vehicleName = tracked.metadata ~= nil and tracked.metadata.vehicleName or nil
         })
     end
+
+    for _, tracked in pairs(owner.trackedAIJobs or {}) do
+        appendTracked(tracked, "giants-ai")
+    end
+
+    if HelperPayrollExternalSessions ~= nil and HelperPayrollExternalSessions.getTrackedSessions ~= nil then
+        for _, tracked in ipairs(HelperPayrollExternalSessions.getTrackedSessions()) do
+            appendTracked(tracked, "external")
+        end
+    end
+
     table.sort(jobs, function(a, b) return (a.sequence or 0) < (b.sequence or 0) end)
     return jobs
 end
@@ -191,6 +208,8 @@ function HelperPayrollSnapshot.build(owner, options)
         enabled = owner.getManagedHelperSlotCount ~= nil and owner:getManagedHelperSlotCount() or 0,
         disabled = 0
     }
+    local activeExternalSessions = HelperPayrollExternalSessions ~= nil and HelperPayrollExternalSessions.getActive ~= nil
+        and HelperPayrollExternalSessions.getActive(owner) or {}
 
     local snapshot = {
         schemaVersion = HelperPayrollSnapshot.SCHEMA_VERSION,
@@ -207,7 +226,8 @@ function HelperPayrollSnapshot.build(owner, options)
             billingBlockReason = owner.runtimeBillingBlockReason,
             authority = "singlePlayerMission",
             multiplayerSupported = false,
-            transportReadySchema = true
+            transportReadySchema = true,
+            externalWorkerSessionsSupported = HelperPayrollExternalSessions ~= nil
         },
         compatibility = compatibility,
         roster = {
@@ -232,6 +252,7 @@ function HelperPayrollSnapshot.build(owner, options)
             roundCharges = owner.settings ~= nil and owner.settings.roundWorkerCharges == true
         },
         activeJobs = activeJobs,
+        externalWorkerSessions = activeExternalSessions,
         pendingPayroll = pendingPayroll,
         ledger = {
             currentPeriodId = owner.ledger ~= nil and owner.ledger.currentPeriodId or nil,
@@ -244,6 +265,7 @@ function HelperPayrollSnapshot.build(owner, options)
         },
         counts = {
             activeJobs = #activeJobs,
+            activeExternalWorkerSessions = #activeExternalSessions,
             pendingPayroll = #pendingPayroll,
             managedWorkers = tonumber(roster.total) or 0,
             enabledWorkers = tonumber(roster.enabled) or 0,
