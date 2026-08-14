@@ -6,7 +6,7 @@
         <en>Helper Payroll Alpha</en>
     </title>
     <description>
-        <en>0.4.3.0 Alpha 2: Adds HelperProfiles roster-aware payroll management. The Workers tab now shows ON-roster workers only while preserving OFF workers' roles, compensation overrides and ledger identities. Payroll snapshots and the public API now expose roster availability and enabled/disabled counts. Also includes the Alpha 1 live dashboard, WorkerCosts compatibility protection and future multiplayer-ready state boundaries; multiplayer remains disabled.</en>
+        <en>0.4.3.0 Alpha 2: Adds HelperProfiles roster-aware payroll management and a generic external-worker session API for controllers that use helpers outside GIANTS activeJobs, including AutoDrive continuity integration. The Workers tab shows ON-roster workers only while preserving OFF workers' roles, compensation overrides and ledger identities. Payroll snapshots and the public API expose roster availability and enabled/disabled counts. Also includes the Alpha 1 live dashboard, WorkerCosts compatibility protection and future multiplayer-ready state boundaries; multiplayer remains disabled.</en>
     </description>
     <iconFilename>HelperPayroll_icon.dds</iconFilename>
     <multiplayer supported="false" />
@@ -51,6 +51,7 @@
     <extraSourceFiles>
         <sourceFile filename="scripts/HelperPayrollCompatibility.lua" />
         <sourceFile filename="scripts/HelperPayrollFarmScope.lua" />
+        <sourceFile filename="scripts/HelperPayrollExternalSessions.lua" />
         <sourceFile filename="scripts/HelperPayrollSnapshot.lua" />
         <sourceFile filename="scripts/HelperPayrollPublicAPI.lua" />
         <sourceFile filename="scripts/gui/HelperPayrollMenu.lua" />
