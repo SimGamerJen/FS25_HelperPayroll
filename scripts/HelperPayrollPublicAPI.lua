@@ -3,7 +3,7 @@
 -- so consumers and future network adapters depend on a stable boundary.
 
 HelperPayrollPublicAPI = HelperPayrollPublicAPI or {}
-HelperPayrollPublicAPI.API_VERSION = 4
+HelperPayrollPublicAPI.API_VERSION = 5
 
 function HelperPayrollPublicAPI.build(owner)
     local api = {
@@ -20,13 +20,16 @@ function HelperPayrollPublicAPI.build(owner)
             multiplayer = false,
             transportReadySnapshot = true,
             rosterAvailability = true,
-            enabledWorkerFiltering = true
+            enabledWorkerFiltering = true,
+            externalWorkerSessions = HelperPayrollExternalSessions ~= nil
         }
     }
 
     function api:getStatus()
         local compatibility = owner.getCompatibilityStatus ~= nil and owner:getCompatibilityStatus() or {}
         local roster = owner.getManagedHelperRosterSummary ~= nil and owner:getManagedHelperRosterSummary() or {}
+        local externalSessions = HelperPayrollExternalSessions ~= nil and HelperPayrollExternalSessions.getActive ~= nil
+            and HelperPayrollExternalSessions.getActive(owner) or {}
         return {
             available = owner.isInitialized == true,
             apiVersion = self.apiVersion,
@@ -44,6 +47,8 @@ function HelperPayrollPublicAPI.build(owner)
             payrollRuntimeEnabled = owner.isPayrollRuntimeEnabled ~= nil and owner:isPayrollRuntimeEnabled() or true,
             compatibilityBlocked = compatibility.blocked == true,
             compatibilityMessage = compatibility.message,
+            externalWorkerSessionsSupported = self.capabilities.externalWorkerSessions == true,
+            activeExternalWorkerSessions = #externalSessions,
             multiplayerSupported = false,
             authority = "singlePlayerMission"
         }
@@ -99,6 +104,27 @@ function HelperPayrollPublicAPI.build(owner)
             enabledWorkers = tonumber(roster.enabled) or 0,
             disabledWorkers = tonumber(roster.disabled) or 0
         }
+    end
+
+    function api:beginExternalWorkerSession(request)
+        if HelperPayrollExternalSessions == nil or HelperPayrollExternalSessions.begin == nil then
+            return false, {status = "external-session-module-unavailable"}
+        end
+        return HelperPayrollExternalSessions.begin(owner, request)
+    end
+
+    function api:endExternalWorkerSession(sessionId, reason)
+        if HelperPayrollExternalSessions == nil or HelperPayrollExternalSessions.finish == nil then
+            return false, {status = "external-session-module-unavailable"}
+        end
+        return HelperPayrollExternalSessions.finish(owner, sessionId, reason)
+    end
+
+    function api:getExternalWorkerSessions()
+        if HelperPayrollExternalSessions == nil or HelperPayrollExternalSessions.getActive == nil then
+            return {}
+        end
+        return HelperPayrollExternalSessions.getActive(owner)
     end
 
     function api:applyRoleMappings(roleMappings, reason)
