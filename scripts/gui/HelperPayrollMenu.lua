@@ -7,9 +7,9 @@ HelperPayrollMenu = {}
 
 local HelperPayrollMenu_mt = Class(HelperPayrollMenu, ScreenElement)
 
-local TAB_TEXTS = {"OVERVIEW", "BILLING", "ROLES", "WORKERS", "LEDGER", "HELP"}
-local TAB_TOPICS = {"overview", "billing", "roles", "workers", "ledger", "help"}
-local TOPIC_INDEX = {overview=1, billing=2, roles=3, workers=4, ledger=5, help=6}
+local TAB_TEXTS = {"DASHBOARD", "BILLING", "ROLES", "WORKERS", "LEDGER", "HELP"}
+local TAB_TOPICS = {"dashboard", "billing", "roles", "workers", "ledger", "help"}
+local TOPIC_INDEX = {dashboard=1, billing=2, roles=3, workers=4, ledger=5, help=6}
 
 local function fmtMoney(v)
     return string.format("%.2f", tonumber(v or 0) or 0)
@@ -34,7 +34,7 @@ end
 function HelperPayrollMenu.new(target, customMt)
     local self = ScreenElement.new(target, customMt or HelperPayrollMenu_mt)
     self.returnScreenName = ""
-    self.currentTopic = "overview"
+    self.currentTopic = "dashboard"
     self.rows = {}
     self.selectedRowIndex = nil
     self.selectedRow = nil
@@ -47,6 +47,7 @@ function HelperPayrollMenu.new(target, customMt)
     self.suppressOptionCallback = false
     self.editControlsInitialised = false
     self.resetConfirmationArmed = false
+    self.liveRefreshAccumulatorMs = 0
     return self
 end
 
@@ -103,7 +104,7 @@ function HelperPayrollMenu.show(modDirectory, topic)
     if controller == nil then
         return false
     end
-    controller.currentTopic = topic or controller.currentTopic or "overview"
+    controller.currentTopic = topic or controller.currentTopic or "dashboard"
     controller:refreshDraftFromRuntime()
     controller:showTopic(controller.currentTopic)
 
@@ -124,12 +125,35 @@ function HelperPayrollMenu:onOpen()
     HelperPayrollMenu:superClass().onOpen(self)
     self:setResetConfirmationArmed(false)
     self:refreshDraftFromRuntime()
-    self:showTopic(self.currentTopic or "overview")
+    self:showTopic(self.currentTopic or "dashboard")
 end
 
 function HelperPayrollMenu:onClose()
     self:setResetConfirmationArmed(false)
     HelperPayrollMenu:superClass().onClose(self)
+end
+
+function HelperPayrollMenu:update(dt)
+    HelperPayrollMenu:superClass().update(self, dt)
+    if self.currentTopic ~= "dashboard" then return end
+
+    self.liveRefreshAccumulatorMs = (tonumber(self.liveRefreshAccumulatorMs) or 0) + (tonumber(dt) or 0)
+    if self.liveRefreshAccumulatorMs < 1000 then return end
+    self.liveRefreshAccumulatorMs = 0
+
+    local selectedIndex = tonumber(self.selectedRowIndex) or 1
+    self:buildRows()
+    if self.itemList ~= nil then
+        self.itemList:reloadData()
+        if #self.rows > 0 and self.itemList.setSelectedIndex ~= nil then
+            selectedIndex = math.max(1, math.min(selectedIndex, #self.rows))
+            pcall(function() self.itemList:setSelectedIndex(selectedIndex, true) end)
+        end
+    end
+    self.selectedRowIndex = selectedIndex
+    self.selectedRow = self.rows[selectedIndex]
+    self:setVisibleSafe(self.itemListSliderBox, #self.rows > 14)
+    self:updateSelectedDetails()
 end
 
 function HelperPayrollMenu:onGuiSetupFinished()
@@ -141,7 +165,7 @@ function HelperPayrollMenu:onGuiSetupFinished()
     end
     self:initialiseEditControls()
     self:refreshDraftFromRuntime()
-    self:showTopic(self.currentTopic or "overview")
+    self:showTopic(self.currentTopic or "dashboard")
 end
 
 function HelperPayrollMenu:refreshDraftFromRuntime()
@@ -199,7 +223,7 @@ function HelperPayrollMenu:setupTabs()
 end
 
 function HelperPayrollMenu:getActiveTabIndex()
-    return TOPIC_INDEX[self.currentTopic or "overview"] or 1
+    return TOPIC_INDEX[self.currentTopic or "dashboard"] or 1
 end
 
 function HelperPayrollMenu:updateTabSelection()
@@ -237,7 +261,7 @@ function HelperPayrollMenu:setDisabledSafe(element, disabled)
 end
 
 function HelperPayrollMenu:showTopic(topic)
-    self.currentTopic = topic or "overview"
+    self.currentTopic = topic or "dashboard"
     self:updateTabSelection()
     self.selectedRowIndex = 1
     self.selectedRow = nil
@@ -246,12 +270,59 @@ function HelperPayrollMenu:showTopic(topic)
 end
 
 function HelperPayrollMenu:buildRows()
-    local topic = self.currentTopic or "overview"
+    local topic = self.currentTopic or "dashboard"
     local rows = {}
     local hp = HelperPayroll
     local profileId = (hp ~= nil and hp.settings ~= nil and hp.settings.activePayrollProfile) or self.draftSettings.activePayrollProfile or "default"
 
-    if topic == "billing" then
+    if topic == "dashboard" then
+        local snapshot = hp ~= nil and hp.getPayrollSnapshot ~= nil and hp:getPayrollSnapshot({includeWorkers=false}) or nil
+        local runtime = snapshot ~= nil and snapshot.runtime or {}
+        local compatibility = snapshot ~= nil and snapshot.compatibility or {}
+        local roster = snapshot ~= nil and snapshot.roster or {}
+        local policy = snapshot ~= nil and snapshot.policy or {}
+        local counts = snapshot ~= nil and snapshot.counts or {}
+        local ledger = snapshot ~= nil and snapshot.ledger or {}
+        local generatedAt = snapshot ~= nil and snapshot.generatedAt or {}
+        local runtimeStatus = runtime.payrollEnabled == true and "ACTIVE" or "BLOCKED"
+        local compatibilityValue = compatibility.blocked == true
+            and tostring(compatibility.primaryConflictName or "Conflict detected")
+            or "Clear"
+
+        rows = {
+            {label="Payroll runtime", value=runtimeStatus, status=runtime.payrollEnabled == true and "Processing" or "Safety block", source="Local mission", info=tostring(runtime.billingBlockReason or "HelperPayroll owns wage suppression and custom payroll processing for this save.")},
+            {label="Compatibility", value=compatibilityValue, status=compatibility.blocked == true and "Action required" or "Safe", source="Compatibility scan", info=tostring(compatibility.message or "No incompatible worker-cost mod detected.")},
+            {label="Authority model", value=tostring(runtime.authority or "singlePlayerMission"), status="Single-player", source="Runtime", info="Payroll state is locally authoritative. Snapshot tables contain scalar values only so the same schema can later be transported from server to clients."},
+            {label="Policy", value=string.format("%s / %s", tostring(policy.payrollMode or "-"), tostring(policy.billingMode or "-")), status=tostring(policy.activePayrollProfile or "default"), source="Savegame", info="Current payroll mode, payment schedule and active profile."},
+            {label="Selected role", value=string.format("%.2f/%s", tonumber(policy.selectedRoleRate) or 0, policy.selectedRolePayBasis == "daily" and "day" or "hr"), status=tostring(policy.selectedRoleName or policy.selectedRole or "Role"), source="Role policy", info="The role captured for new jobs while roleType payroll mode is active."},
+            {label="Payroll clock", value=string.format("%s:00", tostring(generatedAt.hour or "?")), status=policy.billingMode == "dailyPayroll" and ("Pays at " .. tostring(policy.payrollHour or 18) .. ":00") or "On job finish", source=tostring(generatedAt.gameDate or "Game clock"), info="Daily payroll rows become payable at the configured in-game hour; overdue rows remain payable after a day transition."},
+            {label="Operational roster", value=string.format("%d ON / %d OFF", tonumber(counts.enabledWorkers) or tonumber(counts.managedWorkers) or 0, tonumber(counts.disabledWorkers) or 0), status=roster.availabilitySupported == true and "HelperProfiles filtered" or "All managed workers", source=tostring(roster.source or "Managed slots"), info="The Workers tab shows operational ON-roster workers only. OFF workers retain their saved role, compensation override and ledger identity and return with the same payroll settings when re-enabled."},
+            {label="Active jobs", value=tostring(counts.activeJobs or 0), status="Live", source="Job tracker", info="Each active job retains its worker, role, compensation and farm assignment captured at job start."},
+            {label="Pending payroll", value=tostring(counts.pendingPayroll or 0), status=tonumber(counts.pendingPayroll or 0) > 0 and "Awaiting settlement" or "Clear", source="Daily ledger", info="Completed work waiting for daily payroll settlement."},
+            {label="Session charged", value=fmtMoney(ledger.sessionCharged), status=string.format("%d entries", tonumber(ledger.sessionEntries) or 0), source="Session ledger", info="Custom payroll deducted during the current game session."},
+            {label="Persistent charged", value=fmtMoney(ledger.charged), status=tostring(ledger.currentPeriodId or "No period"), source="Persistent ledger", info="Cumulative custom payroll recorded in the persistent ledger index."}
+        }
+
+        for _, job in ipairs(snapshot ~= nil and snapshot.activeJobs or {}) do
+            table.insert(rows, {
+                label=string.format("Active #%s - %s", tostring(job.sequence or "?"), tostring(job.helperName or "Worker")),
+                value=string.format("%.3fh | %.2f est.", tonumber(job.elapsedHours) or 0, tonumber(job.chargeEstimate) or 0),
+                status=string.format("%s / %s", tostring(job.roleName or job.roleId or "Role"), tostring(job.helperSlot or "unassigned")),
+                source=string.format("%s | F%s", tostring(job.jobType or "AI job"), tostring(job.farmId or "?")),
+                info=string.format("Job-start snapshot: rate %.2f/%s; current labour estimate %.2f; charge estimate %.2f. Farm ownership source is retained with the assignment for future authority validation.", tonumber(job.payRate) or 0, job.payBasis == "daily" and "day" or "hr", tonumber(job.labourEstimate) or 0, tonumber(job.chargeEstimate) or 0)
+            })
+        end
+
+        for _, pending in ipairs(snapshot ~= nil and snapshot.pendingPayroll or {}) do
+            table.insert(rows, {
+                label=string.format("Pending - %s", tostring(pending.helperName or "Worker")),
+                value=string.format("%.2f | %d job(s)", tonumber(pending.chargeEstimate) or 0, tonumber(pending.jobs) or 0),
+                status=pending.due == true and "Due now" or tostring(pending.dueReason or "Waiting"),
+                source=string.format("%s | F%s", tostring(pending.gameDate or "unknown"), tostring(pending.farmId or "?")),
+                info=string.format("Pending %s payroll for %s. Labour %.2f; estimated settlement %.2f.", tostring(pending.payBasis or "hourly"), tostring(pending.roleName or pending.roleId or "role"), tonumber(pending.labour) or 0, tonumber(pending.chargeEstimate) or 0)
+            })
+        end
+    elseif topic == "billing" then
         rows = {
             {id="payrollMode", label="Payroll mode", value=tostring(self.draftSettings.payrollMode or "roleType"), status="Editable", source="Savegame", editType="option", options={"roleType", "helperSlot"}, info="roleType assigns every new job to the selected payroll role. helperSlot uses the deployed A-T worker, with live HelperProfiles identity data when available."},
             {id="billingMode", label="Billing mode", value=tostring(self.draftSettings.billingMode or "onJobFinish"), status="Editable", source="Savegame", editType="option", options={"onJobFinish", "dailyPayroll"}, info="onJobFinish charges each completed job immediately. dailyPayroll aggregates each worker's completed work for the game day and settles it through payroll."},
@@ -276,7 +347,18 @@ function HelperPayrollMenu:buildRows()
         if roleOrder == nil or #roleOrder == 0 then
             roleOrder = {tostring(hp ~= nil and hp.settings ~= nil and hp.settings.fallbackRole or "standard")}
         end
-        for _, slot in ipairs(hp:getManagedHelperSlots()) do
+        local rosterSummary = hp ~= nil and hp.getManagedHelperRosterSummary ~= nil and hp:getManagedHelperRosterSummary() or nil
+        if rosterSummary ~= nil and rosterSummary.supported == true then
+            table.insert(rows, {
+                label="HelperProfiles roster filter",
+                value=string.format("%d ON / %d OFF", tonumber(rosterSummary.enabled) or 0, tonumber(rosterSummary.disabled) or 0),
+                status="Operational workers only",
+                source=tostring(rosterSummary.source or "HelperProfiles API"),
+                info="Only workers marked ON in HelperProfiles are listed below. OFF workers remain stored in HelperPayroll with their role, custom compensation and ledger identity intact."
+            })
+        end
+        local workerSlots = hp ~= nil and hp.getOperationalHelperSlots ~= nil and hp:getOperationalHelperSlots() or hp:getManagedHelperSlots()
+        for _, slot in ipairs(workerSlots) do
             local slotInfo = hp ~= nil and hp.getHelperProfilesSlotInfo ~= nil and hp:getHelperProfilesSlotInfo(slot) or nil
             local displayName = slotInfo ~= nil and slotInfo.displayName or ("Helper " .. slot)
             local identityId = slotInfo ~= nil and slotInfo.identityId or ("slot:" .. slot)
@@ -322,42 +404,40 @@ function HelperPayrollMenu:buildRows()
 end
 
 function HelperPayrollMenu:buildBodyText()
-    local hp = HelperPayroll
-    local topic = self.currentTopic or "overview"
-    if topic == "overview" then
-        local roleName = "-"
-        local rate = 0
-        if hp ~= nil then
-            local roleId, workerName, hourlyRate = hp:getSelectedRoleInfo()
-            roleName = workerName or roleId or roleName
-            rate = tonumber(hourlyRate) or 0
-        end
-        local hpStatus = hp ~= nil and hp.getHelperProfilesStatus ~= nil and hp:getHelperProfilesStatus() or nil
-        local integration = "Standalone"
-        if hpStatus ~= nil and hpStatus.available == true then
-            integration = string.format("Connected (API v%s)", tostring(hpStatus.apiVersion or "?"))
-        elseif hpStatus ~= nil and hpStatus.modLoaded == true then
-            integration = "Loaded (API unavailable)"
-        end
-        local pendingRows = hp ~= nil and hp.countPendingDailyPayrollRows ~= nil and hp:countPendingDailyPayrollRows() or 0
-        local roleBasis = "hourly"
-        if hp ~= nil and hp.getRoleCompensationPolicy ~= nil then
-            local roleId = hp.settings ~= nil and hp.settings.selectedRole or "standard"
-            local policy = hp:getRoleCompensationPolicy(hp.settings.activePayrollProfile, roleId)
-            if policy ~= nil then roleBasis = policy.payBasis or roleBasis end
-        end
-        return string.format("Profile: %s\nPayroll mode: %s\nPayment schedule: %s\nSelected role: %s (%.2f/%s)\nGlobal callout fee: %.2f\nHelperProfiles: %s\nPending payroll rows: %d\nCurrent-save settings: %s\n\nUse BILLING for payment timing, ROLES for default compensation, WORKERS for named-worker overrides, and LEDGER for accumulated history.", tostring(hp and hp.settings and hp.settings.activePayrollProfile or "-"), tostring(hp and hp.settings and hp.settings.payrollMode or "-"), tostring(hp and hp.settings and hp.settings.billingMode or "-"), tostring(roleName), tonumber(rate) or 0, roleBasis == "daily" and "day" or "hr", tonumber(hp and hp.settings and hp.settings.workerCalloutFee or 0) or 0, tostring(integration), tonumber(pendingRows) or 0, tostring(hp and hp.persistence and hp.persistence.filePath or "-"))
-    elseif topic == "help" then
-        return "HelperPayroll Management\n\nChanges are staged until APPLY is pressed. APPLY writes gameplay settings to the current save only; it does not overwrite the global default policy. DISCARD restores the currently loaded values.\n\nROLES defines the default pay basis, rate, and hourly minimum call-out. WORKERS can inherit those settings or override all three for a named A-T worker.\n\nHourly pay is hours multiplied by rate, subject to the minimum call-out. Daily pay is charged once per worker per game day when that worker completes work. Payment schedule is separate: onJobFinish settles immediately, while dailyPayroll settles at the configured payroll hour."
+    local topic = self.currentTopic or "dashboard"
+    if topic == "help" then
+        return [=[HelperPayroll Management
+
+The DASHBOARD is a live, read-only view of runtime safety, active worker jobs, pending payroll and ledger totals. Changes elsewhere are staged until APPLY is pressed. APPLY writes gameplay settings to the current save only; it does not overwrite the global default policy. DISCARD restores the currently loaded values.
+
+ROLES defines the default pay basis, rate, and hourly minimum call-out. WORKERS can inherit those settings or override all three for a named A-T worker. When HelperProfiles roster availability is present, the Workers tab lists ON-roster workers only; OFF workers keep their existing mappings and overrides and reappear unchanged when enabled again.
+
+Hourly pay is hours multiplied by rate, subject to the minimum call-out. Daily pay is charged once per worker per game day when that worker completes work. Payment schedule is separate: onJobFinish settles immediately, while dailyPayroll settles at the configured payroll hour.
+
+This build remains single-player. Payroll snapshots and farm-scoped job assignments are structured so server authority and client synchronization can be added later without replacing the public data contract.]=]
     end
     return ""
 end
 
 function HelperPayrollMenu:updateContent()
-    local tableVisible = self.currentTopic == "billing" or self.currentTopic == "roles" or self.currentTopic == "workers" or self.currentTopic == "ledger"
+    local tableVisible = self.currentTopic == "dashboard" or self.currentTopic == "billing" or self.currentTopic == "roles" or self.currentTopic == "workers" or self.currentTopic == "ledger"
+    local editableTopic = self.currentTopic == "billing" or self.currentTopic == "roles" or self.currentTopic == "workers"
     self:setVisibleSafe(self.tableContainer, tableVisible)
     self:setVisibleSafe(self.bodyTextElement, not tableVisible)
+    self:setVisibleSafe(self.applyButton, editableTopic)
+    self:setVisibleSafe(self.discardButton, editableTopic)
     self:setTextSafe(self.bodyTextElement, self:buildBodyText())
+    if self.currentTopic == "dashboard" then
+        self:setTextSafe(self.hintText, "Live payroll dashboard | Runtime safety, active jobs and pending settlements | Refreshes every second")
+    elseif self.currentTopic == "workers" then
+        self:setTextSafe(self.hintText, "Worker payroll management | HelperProfiles OFF-roster workers are hidden but their saved payroll data is retained")
+    elseif editableTopic then
+        self:setTextSafe(self.hintText, "HelperPayroll management | Changes are staged until APPLY writes the current save payroll settings")
+    elseif self.currentTopic == "ledger" then
+        self:setTextSafe(self.hintText, "Persistent payroll ledger summary | Read-only")
+    else
+        self:setTextSafe(self.hintText, "HelperPayroll help and operating notes")
+    end
     if self.itemList ~= nil then
         self.itemList:reloadData()
         if #self.rows > 0 and self.itemList.setSelectedIndex ~= nil then
@@ -459,7 +539,9 @@ end
 
 function HelperPayrollMenu:updateSelectedDetails()
     local row = self.selectedRow
-    local info = "Select an editable row, then use the left/right controls in the Value column. APPLY writes the current save payroll settings."
+    local info = self.currentTopic == "dashboard"
+        and "The dashboard refreshes every second. Select a row for its payroll or compatibility detail."
+        or "Select an editable row, then use the left/right controls in the Value column. APPLY writes the current save payroll settings."
     if row ~= nil then
         if row.editType ~= nil then
             info = string.format("%s | Draft value: %s | %s", tostring(row.label or "Selected item"), tostring(self:formatDraftValue(row)), tostring(row.info or "Use the Value-column controls to change this setting."))
@@ -634,6 +716,7 @@ function HelperPayrollMenu:onClickReload()
     if HelperPayroll ~= nil then
         HelperPayroll:loadConfig()
         HelperPayroll:loadSavegameSettings()
+        if HelperPayroll.refreshCompatibilityStatus ~= nil then HelperPayroll:refreshCompatibilityStatus("gui-reload") end
     end
     self:refreshDraftFromRuntime()
     self:showTopic(self.currentTopic)
@@ -677,7 +760,7 @@ function HelperPayrollMenu:onPagePrevious()
     self:showTopic(TAB_TOPICS[idx])
 end
 
-function HelperPayrollMenu:onClickOverview() self:cancelResetConfirmation(); self:showTopic("overview") end
+function HelperPayrollMenu:onClickDashboard() self:cancelResetConfirmation(); self:showTopic("dashboard") end
 function HelperPayrollMenu:onClickBilling() self:cancelResetConfirmation(); self:showTopic("billing") end
 function HelperPayrollMenu:onClickRoles() self:cancelResetConfirmation(); self:showTopic("roles") end
 function HelperPayrollMenu:onClickWorkers() self:cancelResetConfirmation(); self:showTopic("workers") end

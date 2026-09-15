@@ -1,5 +1,5 @@
 -- Helper Payroll
--- Version: 0.4.2.0-alpha2
+-- Version: 0.4.3.0-alpha2
 -- Purpose:
 --   1. Suppress vanilla AI worker payments.
 --   2. Track active AI jobs.
@@ -14,7 +14,7 @@ local hpGetTimeMs
 
 HelperPayroll = {}
 HelperPayroll.MOD_NAME = g_currentModName or "FS25_HelperPayroll"
-HelperPayroll.VERSION = "0.4.2.0"
+HelperPayroll.VERSION = "0.4.3.0"
 HelperPayroll.RELEASE_CHANNEL = "alpha2"
 HelperPayroll.TARGET_HELPER_SLOTS = 20
 HelperPayroll.MOD_DIRECTORY = g_currentModDirectory or ""
@@ -53,6 +53,10 @@ HelperPayroll.helperProfilesMappingsByIdentity = {}
 HelperPayroll.helperProfilesMappingsBySlot = {}
 HelperPayroll.integrationAPI = nil
 HelperPayroll.integrationAPIPublished = false
+HelperPayroll.compatibilityStatus = nil
+HelperPayroll.runtimeBillingBlocked = false
+HelperPayroll.runtimeBillingBlockReason = nil
+HelperPayroll.compatibilityWarningShown = false
 HelperPayroll.originalFarmAddMoney = nil
 HelperPayroll.aiWorkerHooksInstalled = false
 HelperPayroll.aiPriceDebugCount = 0
@@ -150,6 +154,75 @@ end
 
 local function rcWarn(message, ...)
     print(string.format("[HelperPayroll][WARN] " .. tostring(message), ...))
+end
+
+function HelperPayroll:refreshCompatibilityStatus(reason)
+    local status = nil
+    if HelperPayrollCompatibility ~= nil and HelperPayrollCompatibility.apply ~= nil then
+        status = HelperPayrollCompatibility.apply(self)
+    else
+        status = {
+            schemaVersion = 1,
+            safe = true,
+            blocked = false,
+            detectedCount = 0,
+            message = "Compatibility module unavailable; no conflict was detected.",
+            conflicts = {}
+        }
+        self.compatibilityStatus = status
+        self.runtimeBillingBlocked = false
+        self.runtimeBillingBlockReason = nil
+    end
+
+    if status.blocked == true then
+        rcWarn("Compatibility safety block active: reason=%s conflict=%s message=%s",
+            tostring(reason or "scan"),
+            tostring(status.primaryConflictName or "unknown"),
+            tostring(status.message))
+    else
+        rcLog("Compatibility scan clear: reason=%s", tostring(reason or "scan"))
+    end
+    return status
+end
+
+function HelperPayroll:getCompatibilityStatus()
+    if self.compatibilityStatus == nil then
+        self:refreshCompatibilityStatus("status-request")
+    end
+    if HelperPayrollCompatibility ~= nil and HelperPayrollCompatibility.copyStatus ~= nil then
+        return HelperPayrollCompatibility.copyStatus(self.compatibilityStatus)
+    end
+    return self.compatibilityStatus
+end
+
+function HelperPayroll:isPayrollRuntimeEnabled()
+    if self.runtimeBillingBlocked == true then return false end
+    if HelperPayrollCompatibility ~= nil and HelperPayrollCompatibility.isRuntimeEnabled ~= nil then
+        return HelperPayrollCompatibility.isRuntimeEnabled(self)
+    end
+    return true
+end
+
+function HelperPayroll:getPayrollSnapshot(options)
+    if HelperPayrollSnapshot ~= nil and HelperPayrollSnapshot.build ~= nil then
+        return HelperPayrollSnapshot.build(self, options)
+    end
+    return {
+        schemaVersion = 1,
+        runtime = {
+            initialized = self.isInitialized == true,
+            payrollEnabled = self:isPayrollRuntimeEnabled(),
+            multiplayerSupported = false,
+            authority = "singlePlayerMission"
+        }
+    }
+end
+
+function HelperPayroll:resolveJobFarmId(job, fallbackFarmId)
+    if HelperPayrollFarmScope ~= nil and HelperPayrollFarmScope.resolveJobFarmId ~= nil then
+        return HelperPayrollFarmScope.resolveJobFarmId(job, fallbackFarmId)
+    end
+    return tonumber(fallbackFarmId) or self:getActiveFarmId(), "legacyFallback"
 end
 
 function HelperPayroll:isDetailedDiagnosticsEnabled()
@@ -556,7 +629,7 @@ function HelperPayroll:showManagementMenu()
     if HelperPayrollMenu ~= nil and HelperPayrollMenu.show ~= nil then
         self.roleListVisible = false
         self.reportOverlayVisible = false
-        return HelperPayrollMenu.show(self.MOD_DIRECTORY, 'overview')
+        return HelperPayrollMenu.show(self.MOD_DIRECTORY, 'dashboard')
     end
     rcWarn('Management GUI is not available')
     return false
@@ -1919,6 +1992,132 @@ function HelperPayroll:getManagedHelperSlots()
     return slots
 end
 
+-- The permanent managed identity set must remain distinct from the operational
+-- HelperProfiles roster. Payroll mappings, worker overrides and historical
+-- identity references are retained for every managed A-T slot even while a
+-- worker is OFF roster. Only operational UI and selection surfaces should use
+-- getOperationalHelperSlots().
+function HelperPayroll:getAllManagedHelperSlots()
+    return self:getManagedHelperSlots()
+end
+
+function HelperPayroll:hasHelperProfilesRosterAvailability()
+    local api = self:getHelperProfilesAPI(true)
+    if api == nil then return false end
+
+    local version = tonumber(api.apiVersion) or 0
+    if version >= 6 and (type(api.getEnabledSlots) == "function" or type(api.isSlotEnabled) == "function") then
+        return true
+    end
+
+    local ok, status = self:callHelperProfilesAPI("getStatus")
+    if ok and type(status) == "table" then
+        if status.enabledProfileCount ~= nil or status.disabledProfileCount ~= nil or status.rosterStateFile ~= nil then
+            return true
+        end
+    end
+
+    local firstSlot = self:indexToHelperSlot(1)
+    ok, status = self:callHelperProfilesAPI("getSlotData", firstSlot)
+    return ok and type(status) == "table" and (status.enabled ~= nil or status.rosterState ~= nil)
+end
+
+function HelperPayroll:isManagedHelperSlotEnabled(slot)
+    local normalizedSlot = self:normaliseHelperSlot(slot)
+    if normalizedSlot == nil then return false, "invalid-slot" end
+
+    if not self:hasHelperProfilesRosterAvailability() then
+        return true, "availability-unavailable"
+    end
+
+    local info = self:getHelperProfilesSlotInfo(normalizedSlot)
+    if info == nil or info.availabilityKnown ~= true then
+        -- Fail open if a companion API is temporarily incomplete. Payroll data
+        -- must not become inaccessible because of a transient load-order issue.
+        return true, "availability-unknown"
+    end
+
+    return info.enabled == true, "helperprofiles-api"
+end
+
+function HelperPayroll:getOperationalHelperSlots()
+    local allSlots = self:getManagedHelperSlots()
+    if not self:hasHelperProfilesRosterAvailability() then
+        return allSlots
+    end
+
+    local enabledSet = {}
+    local ok, rows = self:callHelperProfilesAPI("getEnabledSlots")
+    if ok and type(rows) == "table" then
+        for _, row in ipairs(rows) do
+            local value = type(row) == "table" and row.slot or row
+            local normalizedSlot = self:normaliseHelperSlot(value)
+            if normalizedSlot ~= nil then enabledSet[normalizedSlot] = true end
+        end
+    end
+
+    local hasEnabledSet = next(enabledSet) ~= nil
+    local operational = {}
+    for _, slot in ipairs(allSlots) do
+        local enabled = enabledSet[slot] == true
+        if not hasEnabledSet then
+            local info = self:getHelperProfilesSlotInfo(slot)
+            enabled = info == nil or info.availabilityKnown ~= true or info.enabled == true
+        end
+        if enabled then operational[#operational + 1] = slot end
+    end
+
+    -- HelperProfiles guarantees at least one ON worker. Retain a fail-open
+    -- fallback if an older or partially initialized API reports none.
+    if #operational == 0 and #allSlots > 0 then
+        return allSlots
+    end
+    return operational
+end
+
+function HelperPayroll:getManagedHelperRosterSummary()
+    local allSlots = self:getManagedHelperSlots()
+    local supported = self:hasHelperProfilesRosterAvailability()
+    if not supported then
+        return {
+            supported = false,
+            source = "managed-slot fallback",
+            total = #allSlots,
+            enabled = #allSlots,
+            disabled = 0
+        }
+    end
+
+    -- Prefer HelperProfiles' aggregate status so the live dashboard does not
+    -- issue twenty per-slot API calls every refresh cycle.
+    local ok, status = self:callHelperProfilesAPI("getStatus")
+    if ok and type(status) == "table" then
+        local total = tonumber(status.profileCount or status.managedSlotCount) or #allSlots
+        local enabled = tonumber(status.enabledProfileCount)
+        local disabled = tonumber(status.disabledProfileCount)
+        if enabled ~= nil or disabled ~= nil then
+            enabled = math.max(0, math.floor(enabled or (total - (disabled or 0))))
+            disabled = math.max(0, math.floor(disabled or (total - enabled)))
+            return {
+                supported = true,
+                source = "HelperProfiles API",
+                total = math.max(0, math.floor(total)),
+                enabled = enabled,
+                disabled = disabled
+            }
+        end
+    end
+
+    local enabled = #self:getOperationalHelperSlots()
+    return {
+        supported = true,
+        source = "HelperProfiles API",
+        total = #allSlots,
+        enabled = enabled,
+        disabled = math.max(0, #allSlots - enabled)
+    }
+end
+
 function HelperPayroll:helperIndexToSlot(helperIndex)
     local slot = self:normaliseHelperSlot(helperIndex)
     return slot
@@ -2079,9 +2278,20 @@ function HelperPayroll:getHelperProfilesSlotInfo(slot)
         return nil
     end
 
+    local availabilityKnown = data.enabled ~= nil or data.rosterState ~= nil
+    local enabled = data.enabled ~= false
+    if data.rosterState ~= nil then
+        local rosterState = string.lower(tostring(data.rosterState))
+        if rosterState == "off" or rosterState == "disabled" then enabled = false end
+        if rosterState == "on" or rosterState == "enabled" then enabled = true end
+    end
+
     return {
         slot = tostring(data.slot or string.upper(tostring(slot))),
         index = tonumber(data.index) or idx,
+        stableIndex = tonumber(data.stableIndex) or tonumber(data.index) or idx,
+        currentIndex = tonumber(data.currentIndex),
+        enabledIndex = tonumber(data.enabledIndex),
         helper = nil,
         canonicalId = data.canonicalId ~= nil and tostring(data.canonicalId) or nil,
         identityId = data.identityId ~= nil and tostring(data.identityId) or nil,
@@ -2092,9 +2302,13 @@ function HelperPayroll:getHelperProfilesSlotInfo(slot)
         appearanceLabel = data.appearanceLabel,
         presetId = data.presetId,
         category = data.category,
+        enabled = enabled,
+        availabilityKnown = availabilityKnown,
+        rosterState = availabilityKnown and tostring(data.rosterState or (enabled and "on" or "off")) or "unknown",
         inUse = data.inUse == true,
         selected = data.selected == true,
         selectedIndex = data.selectedIndex,
+        resolutionSource = data.resolutionSource ~= nil and tostring(data.resolutionSource) or nil,
         source = tostring(data.source or "shared-api")
     }
 end
@@ -2116,6 +2330,8 @@ function HelperPayroll:getHelperProfilesStatus()
     local selectedName = apiStatus ~= nil and apiStatus.selectedName or nil
     local selectedIndex = apiStatus ~= nil and tonumber(apiStatus.selectedIndex) or nil
     local profileCount = apiStatus ~= nil and tonumber(apiStatus.profileCount) or 0
+    local enabledProfileCount = apiStatus ~= nil and tonumber(apiStatus.enabledProfileCount) or nil
+    local disabledProfileCount = apiStatus ~= nil and tonumber(apiStatus.disabledProfileCount) or nil
 
     if selectedSlot == nil and apiAvailable then
         local ok, result = self:callHelperProfilesAPI("getSelectedSlot")
@@ -2151,6 +2367,9 @@ function HelperPayroll:getHelperProfilesStatus()
         source = source,
         profileCount = profileCount,
         identityCount = profileCount,
+        rosterAvailability = self:hasHelperProfilesRosterAvailability(),
+        enabledProfileCount = enabledProfileCount,
+        disabledProfileCount = disabledProfileCount,
         selectedIndex = selectedIndex,
         selectedSlot = selectedSlot,
         selectedName = selectedName,
@@ -2317,6 +2536,12 @@ function HelperPayroll:getIntegrationRoleForSlot(slot)
 
     return {
         slot = normalizedSlot,
+        enabled = slotInfo == nil or slotInfo.enabled ~= false,
+        availabilityKnown = slotInfo ~= nil and slotInfo.availabilityKnown == true,
+        rosterState = slotInfo ~= nil and tostring(slotInfo.rosterState or "unknown") or "unknown",
+        enabledIndex = slotInfo ~= nil and slotInfo.enabledIndex or nil,
+        selected = slotInfo ~= nil and slotInfo.selected == true,
+        inUse = slotInfo ~= nil and slotInfo.inUse == true,
         canonicalId = slotInfo ~= nil and slotInfo.canonicalId or nil,
         identityId = slotInfo ~= nil and slotInfo.identityId or ("slot:" .. normalizedSlot),
         identityAliases = slotInfo ~= nil and slotInfo.identityAliases or {"slot:" .. normalizedSlot},
@@ -2378,48 +2603,28 @@ function HelperPayroll:applyIntegrationRoleMappings(roleMappings, reason)
 end
 
 function HelperPayroll:buildIntegrationAPI()
+    if HelperPayrollPublicAPI ~= nil and HelperPayrollPublicAPI.build ~= nil then
+        return HelperPayrollPublicAPI.build(self)
+    end
+
+    rcWarn("Public API module unavailable; publishing reduced compatibility API")
     local owner = self
     local api = {
         apiVersion = 2,
         modName = "FS25_HelperPayroll",
-        modVersion = tostring(self.VERSION or "0.4.2.0"),
-        readOnly = false
+        modVersion = tostring(self.VERSION or "0.4.3.0"),
+        readOnly = true
     }
-
     function api:getStatus()
         return {
             available = owner.isInitialized == true,
             apiVersion = self.apiVersion,
             modName = self.modName,
             modVersion = self.modVersion,
-            activePayrollProfile = tostring(owner.settings.activePayrollProfile or "default"),
-            payrollMode = tostring(owner.settings.payrollMode or "roleType"),
-            billingMode = tostring(owner.settings.billingMode or "onJobFinish"),
-            managedSlotCount = owner:getManagedHelperSlotCount(),
-            targetSlotCount = tonumber(owner.TARGET_HELPER_SLOTS) or 20
+            payrollRuntimeEnabled = owner:isPayrollRuntimeEnabled(),
+            multiplayerSupported = false
         }
     end
-
-    function api:getRoles()
-        return owner:getIntegrationRoleRows()
-    end
-
-    function api:getRoleForSlot(slot)
-        return owner:getIntegrationRoleForSlot(slot)
-    end
-
-    function api:getSlots()
-        local rows = {}
-        for index, slot in ipairs(owner:getManagedHelperSlots()) do
-            rows[index] = owner:getIntegrationRoleForSlot(slot)
-        end
-        return rows
-    end
-
-    function api:applyRoleMappings(roleMappings, reason)
-        return owner:applyIntegrationRoleMappings(roleMappings, reason)
-    end
-
     return api
 end
 
@@ -2427,7 +2632,7 @@ function HelperPayroll:publishIntegrationAPI(reason)
     if self.integrationAPI == nil then
         self.integrationAPI = self:buildIntegrationAPI()
     end
-    self.integrationAPI.modVersion = tostring(self.VERSION or "0.4.2.0")
+    self.integrationAPI.modVersion = tostring(self.VERSION or "0.4.3.0")
 
     -- Publish globally as well as on the mission. GUI dialogs can be created
     -- during a different mission lifecycle phase, so mission-only publication
@@ -2590,7 +2795,7 @@ function HelperPayroll:captureWorkerAssignment(tracked)
     assignment.gameDate = clock.dateKey
     assignment.workMonotonicDay = clock.monotonicDay
     assignment.workDayTime = clock.dayTimeMs
-    assignment.farmId = self:getActiveFarmId()
+    assignment.farmId, assignment.farmIdSource = self:resolveJobFarmId(tracked ~= nil and tracked.job or nil, nil)
     assignment.snapshotSource = "job-start"
     return assignment
 end
@@ -2605,7 +2810,7 @@ function HelperPayroll:getWorkerAssignmentForBilling(tracked)
     assignment.gameDate = clock.dateKey
     assignment.workMonotonicDay = clock.monotonicDay
     assignment.workDayTime = clock.dayTimeMs
-    assignment.farmId = self:getActiveFarmId()
+    assignment.farmId, assignment.farmIdSource = self:resolveJobFarmId(tracked ~= nil and tracked.job or nil, nil)
     assignment.snapshotSource = "finish-fallback"
     rcWarn("Worker assignment snapshot was unavailable at billing time; resolved a fallback assignment at job finish")
     return assignment
@@ -2682,21 +2887,13 @@ function HelperPayroll:isOnJobFinishMode()
 end
 
 function HelperPayroll:getActiveFarmId()
-    local farmId = nil
-    if g_currentMission ~= nil and g_currentMission.getFarmId ~= nil then
-        farmId = g_currentMission:getFarmId()
+    if HelperPayrollFarmScope ~= nil and HelperPayrollFarmScope.getMissionFarmId ~= nil then
+        local farmId = HelperPayrollFarmScope.getMissionFarmId()
+        if farmId ~= nil then return farmId end
     end
 
-    if farmId == nil and g_currentMission ~= nil and g_currentMission.player ~= nil and g_currentMission.player.farmId ~= nil then
-        farmId = g_currentMission.player.farmId
-    end
-
-    if farmId == nil then
-        farmId = 1
-        rcWarn("Could not resolve active farmId for worker charge; falling back to farmId=1")
-    end
-
-    return farmId
+    rcWarn("Could not resolve active farmId for worker charge; falling back to farmId=1")
+    return 1
 end
 
 function HelperPayroll:calculateWorkerCharge(tracked)
@@ -2976,6 +3173,11 @@ function HelperPayroll:calculateDailyPayrollCharge(daily)
 end
 
 function HelperPayroll:applyMoneyCharge(amount, farmId, context)
+    if not self:isPayrollRuntimeEnabled() then
+        rcWarn("Could not apply %s; payroll runtime is blocked by compatibility protection", tostring(context or "worker charge"))
+        return false
+    end
+
     if g_currentMission == nil or g_currentMission.addMoney == nil then
         rcWarn("Could not apply %s; g_currentMission.addMoney is not available", tostring(context or "worker charge"))
         return false
@@ -3053,6 +3255,7 @@ function HelperPayroll:isDailyPayrollRowDue(daily, clock, payrollHour)
 end
 
 function HelperPayroll:processDailyPayroll(dt, force, triggerReason)
+    if not self:isPayrollRuntimeEnabled() then return end
     if not self:isDailyPayrollMode() then return end
     if not self.settings.enableCustomWorkerCosts or not self.settings.chargeCustomWorkerCosts then return end
 
@@ -3166,6 +3369,11 @@ end
 
 
 function HelperPayroll:applyWorkerCharge(tracked)
+    if not self:isPayrollRuntimeEnabled() then
+        rcWarn("Worker billing skipped because the runtime compatibility safety block is active")
+        return false
+    end
+
     if tracked == nil then
         return false
     end
@@ -3212,6 +3420,7 @@ function HelperPayroll:applyWorkerCharge(tracked)
         charge = 0,
         calculatedJobCharge = chargeToApply,
         farmId = farmId,
+        farmIdSource = breakdown.farmIdSource,
         profileId = breakdown.profileId,
         gameDate = breakdown.gameDate or self:getGameDateKey(),
         workMonotonicDay = breakdown.workMonotonicDay,
@@ -3399,6 +3608,13 @@ function HelperPayroll:getAIJobDebugName(job)
 end
 
 function HelperPayroll.aiJobGetPricePerMs(job, superFunc, ...)
+    if not HelperPayroll:isPayrollRuntimeEnabled() or not HelperPayroll.settings.suppressVanillaAIWorkerCosts then
+        if superFunc ~= nil then
+            return superFunc(job, ...)
+        end
+        return 0
+    end
+
     local jobName = HelperPayroll:getAIJobDebugName(job)
     local stats = HelperPayroll.aiPriceStatsByType[jobName]
 
@@ -3442,6 +3658,11 @@ function HelperPayroll.aiJobGetPricePerMs(job, superFunc, ...)
 end
 
 function HelperPayroll:installAIWorkerHooks()
+    if not self:isPayrollRuntimeEnabled() then
+        rcWarn("AI worker price hooks skipped because payroll runtime is blocked by compatibility protection")
+        return
+    end
+
     if self.aiWorkerHooksInstalled then
         rcLog("AI worker price hooks already installed")
         return
@@ -3493,6 +3714,7 @@ function HelperPayroll:installAIWorkerHooks()
 end
 
 function HelperPayroll:scanActiveAIJobs(dt)
+    if not self:isPayrollRuntimeEnabled() then return end
     if g_currentMission == nil or g_currentMission.aiSystem == nil then
         return
     end
@@ -3525,7 +3747,7 @@ function HelperPayroll:scanActiveAIJobs(dt)
             self.trackedAIJobs[jobId].helperSlotSource = assignment.helperSlotSource
             self.trackedAIJobs[jobId].helperSlotUsedForPayroll = assignment.helperSlotUsedForPayroll
             self.trackedAIJobs[jobId].payrollMode = assignment.payrollMode
-            rcLog("AI job detected #%d: id=%s type=%s payrollMode=%s helperSlot=%s helperSlotSource=%s helperSlotUsedForPayroll=%s identityId=%s identitySource=%s mappingSource=%s helper=%s role=%s workerRate=%s profile=%s rate=%.2f assignmentSnapshot=%s", self.trackedAIJobCount, tostring(jobId), tostring(self.trackedAIJobs[jobId].name), tostring(assignment.payrollMode), tostring(assignment.helperSlot), tostring(assignment.helperSlotSource), tostring(assignment.helperSlotUsedForPayroll), tostring(assignment.helperIdentityId or "-"), tostring(assignment.helperIdentitySource or "unknown"), tostring(assignment.helperMappingSource or "unknown"), tostring(assignment.helperName), tostring(assignment.helperRole), tostring(assignment.workerId), tostring(assignment.profileId), tonumber(assignment.hourlyRate) or 0, tostring(assignment.snapshotSource))
+            rcLog("AI job detected #%d: id=%s type=%s payrollMode=%s helperSlot=%s helperSlotSource=%s helperSlotUsedForPayroll=%s identityId=%s identitySource=%s mappingSource=%s helper=%s role=%s workerRate=%s profile=%s rate=%.2f farmId=%s farmIdSource=%s assignmentSnapshot=%s", self.trackedAIJobCount, tostring(jobId), tostring(self.trackedAIJobs[jobId].name), tostring(assignment.payrollMode), tostring(assignment.helperSlot), tostring(assignment.helperSlotSource), tostring(assignment.helperSlotUsedForPayroll), tostring(assignment.helperIdentityId or "-"), tostring(assignment.helperIdentitySource or "unknown"), tostring(assignment.helperMappingSource or "unknown"), tostring(assignment.helperName), tostring(assignment.helperRole), tostring(assignment.workerId), tostring(assignment.profileId), tonumber(assignment.hourlyRate) or 0, tostring(assignment.farmId or "?"), tostring(assignment.farmIdSource or "unknown"), tostring(assignment.snapshotSource))
             self:diagnosticScanAIJobForHelperProfiles(job, self.trackedAIJobs[jobId])
         end
 
@@ -5166,10 +5388,13 @@ function HelperPayroll:hpayProfiles(...)
             tostring(self:shouldSuppressStandaloneRoleInputs())
         )
         hpayPrintf(
-            "HelperProfiles API: apiVersion=%s modVersion=%s profiles=%d selectedSlot=%s selectedName=%s pickMode=%s",
+            "HelperProfiles API: apiVersion=%s modVersion=%s profiles=%d enabled=%s disabled=%s rosterAvailability=%s selectedSlot=%s selectedName=%s pickMode=%s",
             tostring(status.apiVersion or "-"),
             tostring(status.helperProfilesVersion or "-"),
             tonumber(status.profileCount) or 0,
+            tostring(status.enabledProfileCount or "-"),
+            tostring(status.disabledProfileCount or "-"),
+            tostring(status.rosterAvailability == true),
             tostring(status.selectedSlot or "-"),
             tostring(status.selectedName or "-"),
             tostring(status.pickMode or "-")
@@ -5203,10 +5428,12 @@ function HelperPayroll:hpayProfiles(...)
             local worker = self:getWorkerRateById(profileId, workerRate)
             local rate = worker ~= nil and tonumber(worker.hourlyRate) or 0
             local marker = hpInfo ~= nil and hpInfo.selected and " *selected" or ""
+            local rosterState = hpInfo ~= nil and tostring(hpInfo.rosterState or "unknown") or "standalone"
             hpayPrintf(
-                "  %s  HelperProfiles=%s  identityId=%s  mappingSource=%s  workerRate=%s  rate=%.2f%s",
+                "  %s  HelperProfiles=%s  roster=%s  identityId=%s  mappingSource=%s  workerRate=%s  rate=%.2f%s",
                 slot,
                 tostring(hpName),
+                rosterState,
                 tostring(identityId),
                 tostring(mappingSource),
                 tostring(workerRate),
@@ -5403,11 +5630,14 @@ function HelperPayroll:hpayDump(...)
     elseif a == "status" or a == "" then
         local roleId, roleName, rate, profileId = self:getSelectedRoleInfo()
         local hpStatus = self:getHelperProfilesStatus()
-        hpayPrintf("Status: version=%s channel=%s payrollMode=%s billingMode=%s profile=%s selectedRole=%s name=%s rate=%.2f trackedJobs=%d pendingRows=%d helperProfilesLoaded=%s helperProfilesApi=%s helperProfilesApiVersion=%s roleListVisible=%s reportOverlayVisible=%s reportPage=%s saveFile=%s globalPolicySource=%s globalPolicyFile=%s",
+        local compatibility = self:getCompatibilityStatus()
+        hpayPrintf("Status: version=%s channel=%s payrollMode=%s billingMode=%s profile=%s selectedRole=%s name=%s rate=%.2f trackedJobs=%d pendingRows=%d helperProfilesLoaded=%s helperProfilesApi=%s helperProfilesApiVersion=%s payrollEnabled=%s compatibilityBlocked=%s conflict=%s authority=singlePlayerMission multiplayerSupported=false snapshotSchema=%s roleListVisible=%s reportOverlayVisible=%s reportPage=%s saveFile=%s globalPolicySource=%s globalPolicyFile=%s",
             tostring(self.VERSION or "0.3.3.0"), tostring(self.RELEASE_CHANNEL or "beta-rc"),
             tostring(self.settings.payrollMode), tostring(self.settings.billingMode), tostring(profileId), tostring(roleId), tostring(roleName), tonumber(rate) or 0,
             tonumber(self.trackedAIJobCount) or 0, self:countPendingDailyPayrollRows(),
             tostring(hpStatus.modLoaded == true), tostring(hpStatus.apiAvailable == true), tostring(hpStatus.apiVersion or "-"),
+            tostring(self:isPayrollRuntimeEnabled()), tostring(compatibility.blocked == true), tostring(compatibility.primaryConflictName or "none"),
+            tostring(HelperPayrollSnapshot ~= nil and HelperPayrollSnapshot.SCHEMA_VERSION or 1),
             tostring(self.roleListVisible == true), tostring(self.reportOverlayVisible == true), tostring(self.reportOverlayPage or 1),
             tostring(self.persistence ~= nil and self.persistence.filePath or "nil"), tostring(self.policyConfig ~= nil and self.policyConfig.source or "unknown"), tostring(self.CONFIG_FILE))
         return
@@ -5452,7 +5682,11 @@ function HelperPayroll:registerConsoleCommands()
 end
 
 function HelperPayroll:installMoneyHooks()
-    -- Legacy diagnostic retained only as a fallback marker. FS25 helper suppression is now done through AIJob.getPricePerMs hooks.
+    -- Legacy diagnostic retained only as a fallback marker. FS25 helper suppression is done through AIJob.getPricePerMs hooks.
+    if not self:isPayrollRuntimeEnabled() then
+        rcWarn("Farm.addMoney hook skipped. Compatibility protection left vanilla helper wages untouched.")
+        return
+    end
     rcLog("Farm.addMoney hook skipped. Using AIJob.getPricePerMs suppression for vanilla helper costs.")
 end
 
@@ -5475,6 +5709,12 @@ function HelperPayroll:logRuntimeStartupStatus()
         tostring(hpStatus.selectedName or "-"),
         tostring(self.persistence ~= nil and self.persistence.savegameName or "unknown")
     )
+    local compatibility = self:getCompatibilityStatus()
+    rcLog("Runtime authority: mode=singlePlayerMission multiplayerSupported=false payrollEnabled=%s compatibilityBlocked=%s conflict=%s snapshotSchema=%s",
+        tostring(self:isPayrollRuntimeEnabled()),
+        tostring(compatibility.blocked == true),
+        tostring(compatibility.primaryConflictName or "none"),
+        tostring(HelperPayrollSnapshot ~= nil and HelperPayrollSnapshot.SCHEMA_VERSION or 1))
 end
 
 function HelperPayroll:processStartupStatus(dt)
@@ -5492,6 +5732,10 @@ function HelperPayroll:processStartupStatus(dt)
 
     self.startupStatusLogged = true
     self:logRuntimeStartupStatus()
+    if self.runtimeBillingBlocked == true and self.compatibilityWarningShown ~= true then
+        self.compatibilityWarningShown = true
+        self:showRoleMessage("HelperPayroll disabled: incompatible worker-cost mod detected")
+    end
 end
 
 function HelperPayroll:initialize(reason)
@@ -5506,8 +5750,10 @@ function HelperPayroll:initialize(reason)
     self.lastPayrollClockDayTime = nil
     self.startupStatusElapsedMs = 0
     self.startupStatusLogged = false
+    self.compatibilityWarningShown = false
     self:loadConfig()
     self:loadSavegameSettings()
+    self:refreshCompatibilityStatus("initialize")
     self:loadLedgerIndex()
     if self.ledger ~= nil and self.ledger.hasIndexFile == true then
         self:loadPeriodLedger(self:getLedgerPeriodId(self:getGameDateKey()))
