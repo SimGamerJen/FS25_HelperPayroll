@@ -86,6 +86,7 @@ function HelperPayrollWorkClock.initialise(owner, tracked)
     tracked.realElapsedMs = tonumber(tracked.realElapsedMs) or 0
     tracked.gameElapsedMs = tonumber(tracked.gameElapsedMs) or 0
     tracked.clockDiscontinuities = tonumber(tracked.clockDiscontinuities) or 0
+    tracked.expectedGameDeltaMs = tonumber(tracked.expectedGameDeltaMs) or 0
     tracked.workSegments = tracked.workSegments or {}
 
     local clock = getClock(owner)
@@ -97,6 +98,7 @@ function HelperPayrollWorkClock.reanchor(owner, tracked)
     if tracked == nil then return end
     tracked.workClockAnchor = copyAnchor(getClock(owner))
     tracked.lastEffectiveTimeScale = getEffectiveTimeScale()
+    tracked.expectedGameDeltaMs = 0
 end
 
 function HelperPayrollWorkClock.accrue(owner, tracked, dt)
@@ -123,14 +125,17 @@ function HelperPayrollWorkClock.accrue(owner, tracked, dt)
     tracked.workClockAnchor = current
     local effectiveScale = getEffectiveTimeScale()
     tracked.lastEffectiveTimeScale = effectiveScale
+    tracked.expectedGameDeltaMs = (tonumber(tracked.expectedGameDeltaMs) or 0) + realDelta * effectiveScale
 
     if previous == nil then
+        tracked.expectedGameDeltaMs = 0
         return 0, "anchored"
     end
 
     local dayDiff = current.monotonicDay - previous.monotonicDay
     if dayDiff < 0 or dayDiff > 1 then
         tracked.clockDiscontinuities = (tonumber(tracked.clockDiscontinuities) or 0) + 1
+        tracked.expectedGameDeltaMs = 0
         return 0, "day-discontinuity"
     end
 
@@ -138,10 +143,11 @@ function HelperPayrollWorkClock.accrue(owner, tracked, dt)
         + current.dayTimeMs - previous.dayTimeMs
     if actualDelta < 0 then
         tracked.clockDiscontinuities = (tonumber(tracked.clockDiscontinuities) or 0) + 1
+        tracked.expectedGameDeltaMs = 0
         return 0, "clock-rollback"
     end
 
-    local expectedDelta = realDelta * effectiveScale
+    local expectedDelta = tonumber(tracked.expectedGameDeltaMs) or 0
     local maximumExpected = math.max(
         HelperPayrollWorkClock.MIN_VALID_STEP_MS,
         expectedDelta * HelperPayrollWorkClock.EXPECTED_STEP_FACTOR
@@ -150,11 +156,16 @@ function HelperPayrollWorkClock.accrue(owner, tracked, dt)
 
     if actualDelta > maximumExpected then
         tracked.clockDiscontinuities = (tonumber(tracked.clockDiscontinuities) or 0) + 1
+        tracked.expectedGameDeltaMs = 0
         return 0, "clock-jump"
     end
 
     if actualDelta <= 0 then
-        return 0, "paused"
+        if effectiveScale <= 0 then
+            tracked.expectedGameDeltaMs = 0
+            return 0, "paused"
+        end
+        return 0, "clock-wait"
     end
 
     if dayDiff == 0 then
@@ -168,6 +179,7 @@ function HelperPayrollWorkClock.accrue(owner, tracked, dt)
 
     tracked.gameElapsedMs = (tonumber(tracked.gameElapsedMs) or 0) + actualDelta
     tracked.elapsedMs = tracked.gameElapsedMs
+    tracked.expectedGameDeltaMs = 0
     return actualDelta, "gameClock"
 end
 
