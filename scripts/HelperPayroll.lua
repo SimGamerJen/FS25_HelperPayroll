@@ -34,6 +34,7 @@ HelperPayroll.settings = {
     chargeCustomWorkerCosts = true,
     billingMode = "onJobFinish",
     workerTimeBasis = "gameClock",
+    maxPayrollTimeScale = 10,
     payrollHour = 18,
     minimumWorkerCharge = 0,
     workerCalloutFee = 0,
@@ -281,6 +282,7 @@ local HPAY_DEFAULT_POLICY_XML = [=[
         <chargeCustomWorkerCosts>true</chargeCustomWorkerCosts>
         <billingMode>onJobFinish</billingMode>
         <workerTimeBasis>gameClock</workerTimeBasis>
+        <maxPayrollTimeScale>10</maxPayrollTimeScale>
         <payrollHour>18</payrollHour>
         <minimumWorkerCharge>5.00</minimumWorkerCharge>
         <workerCalloutFee>0.00</workerCalloutFee>
@@ -506,6 +508,7 @@ function HelperPayroll:buildPolicyConfigXmlFromRuntime()
     add(string.format('        <chargeCustomWorkerCosts>%s</chargeCustomWorkerCosts>', tostring(settings.chargeCustomWorkerCosts == true)))
     add(string.format('        <billingMode>%s</billingMode>', hpayXmlEscape(settings.billingMode or 'onJobFinish')))
     add(string.format('        <workerTimeBasis>%s</workerTimeBasis>', hpayXmlEscape(settings.workerTimeBasis or 'gameClock')))
+    add(string.format('        <maxPayrollTimeScale>%s</maxPayrollTimeScale>', tostring(tonumber(settings.maxPayrollTimeScale) or 10)))
     add(string.format('        <payrollHour>%s</payrollHour>', tostring(math.floor(tonumber(settings.payrollHour) or 18))))
     add(string.format('        <minimumWorkerCharge>%.2f</minimumWorkerCharge>', tonumber(settings.minimumWorkerCharge) or 0))
     add(string.format('        <workerCalloutFee>%.2f</workerCalloutFee>', tonumber(settings.workerCalloutFee) or 0))
@@ -591,6 +594,7 @@ function HelperPayroll:applyManagementDraft(draftSettings, draftRolePolicies, dr
     self.settings.workerTimeBasis = HelperPayrollWorkClock ~= nil
         and HelperPayrollWorkClock.normaliseTimeBasis(draftSettings.workerTimeBasis or self.settings.workerTimeBasis)
         or tostring(draftSettings.workerTimeBasis or self.settings.workerTimeBasis or 'gameClock')
+    self.settings.maxPayrollTimeScale = math.max(0, tonumber(draftSettings.maxPayrollTimeScale or self.settings.maxPayrollTimeScale) or 10)
     self.settings.payrollHour = math.floor(tonumber(draftSettings.payrollHour or self.settings.payrollHour) or 18)
     self.settings.minimumWorkerCharge = tonumber(draftSettings.minimumWorkerCharge or self.settings.minimumWorkerCharge) or 0
     self.settings.workerCalloutFee = tonumber(draftSettings.workerCalloutFee or self.settings.workerCalloutFee) or 0
@@ -702,6 +706,7 @@ function HelperPayroll:loadConfig()
     if HelperPayrollWorkClock ~= nil and HelperPayrollWorkClock.normaliseTimeBasis ~= nil then
         self.settings.workerTimeBasis = HelperPayrollWorkClock.normaliseTimeBasis(self.settings.workerTimeBasis)
     end
+    self.settings.maxPayrollTimeScale = math.max(0, getXmlFloatOrDefault(xmlFile, "helperPayroll.settings.maxPayrollTimeScale", self.settings.maxPayrollTimeScale or 10))
     self.settings.payrollHour = getXmlFloatOrDefault(xmlFile, "helperPayroll.settings.payrollHour", self.settings.payrollHour)
     self.settings.minimumWorkerCharge = getXmlFloatOrDefault(xmlFile, "helperPayroll.settings.minimumWorkerCharge", self.settings.minimumWorkerCharge)
     self.settings.workerCalloutFee = getXmlFloatOrDefault(xmlFile, "helperPayroll.settings.workerCalloutFee", self.settings.workerCalloutFee)
@@ -718,7 +723,7 @@ function HelperPayroll:loadConfig()
 
     delete(xmlFile)
     rcLog("Loaded config. source=%s file=%s Active payroll profile: %s", tostring(self.policyConfig ~= nil and self.policyConfig.source or "unknown"), tostring(self.CONFIG_FILE), tostring(self.settings.activePayrollProfile))
-    rcLog("Worker billing settings: enabled=%s payrollMode=%s billingMode=%s timeBasis=%s payrollHour=%s selectedRole=%s fallbackRole=%s defaultHelperSlot=%s minimum=%.2f callout=%.2f round=%s logLevel=%s helperProfilesDiagnostics=%s", tostring(self.settings.chargeCustomWorkerCosts), tostring(self.settings.payrollMode), tostring(self.settings.billingMode), tostring(self.settings.workerTimeBasis), tostring(self.settings.payrollHour), tostring(self.settings.selectedRole), tostring(self.settings.fallbackRole), tostring(self.settings.defaultHelperSlot ~= "" and self.settings.defaultHelperSlot or "none"), tonumber(self.settings.minimumWorkerCharge) or 0, tonumber(self.settings.workerCalloutFee) or 0, tostring(self.settings.roundWorkerCharges), tostring(self.settings.logLevel), tostring(self.settings.helperProfilesDiagnostics))
+    rcLog("Worker billing settings: enabled=%s payrollMode=%s billingMode=%s timeBasis=%s maxPayrollTimeScale=%s payrollHour=%s selectedRole=%s fallbackRole=%s defaultHelperSlot=%s minimum=%.2f callout=%.2f round=%s logLevel=%s helperProfilesDiagnostics=%s", tostring(self.settings.chargeCustomWorkerCosts), tostring(self.settings.payrollMode), tostring(self.settings.billingMode), tostring(self.settings.workerTimeBasis), tostring(self.settings.maxPayrollTimeScale), tostring(self.settings.payrollHour), tostring(self.settings.selectedRole), tostring(self.settings.fallbackRole), tostring(self.settings.defaultHelperSlot ~= "" and self.settings.defaultHelperSlot or "none"), tonumber(self.settings.minimumWorkerCharge) or 0, tonumber(self.settings.workerCalloutFee) or 0, tostring(self.settings.roundWorkerCharges), tostring(self.settings.logLevel), tostring(self.settings.helperProfilesDiagnostics))
     self:logHelperSlotConfig()
 end
 
@@ -4041,6 +4046,7 @@ function HelperPayroll:loadSavegameSettings()
     if HelperPayrollWorkClock ~= nil and HelperPayrollWorkClock.normaliseTimeBasis ~= nil then
         self.settings.workerTimeBasis = HelperPayrollWorkClock.normaliseTimeBasis(self.settings.workerTimeBasis)
     end
+    self.settings.maxPayrollTimeScale = math.max(0, getXmlFloatOrDefault(xmlFile, "helperPayrollSave.policy#maxPayrollTimeScale", self.settings.maxPayrollTimeScale or 10))
     self.settings.payrollHour = getXmlFloatOrDefault(xmlFile, "helperPayrollSave.policy#payrollHour", self.settings.payrollHour or 18)
     self.settings.minimumWorkerCharge = getXmlFloatOrDefault(xmlFile, "helperPayrollSave.policy#minimumWorkerCharge", self.settings.minimumWorkerCharge or 0)
     self.settings.workerCalloutFee = getXmlFloatOrDefault(xmlFile, "helperPayrollSave.policy#workerCalloutFee", self.settings.workerCalloutFee or 0)
@@ -4259,6 +4265,7 @@ function HelperPayroll:saveSavegameSettings(reason)
     -- Save-specific gameplay policy overrides written by the management UI.
     setXMLString(xmlFile, "helperPayrollSave.policy#billingMode", tostring(self.settings.billingMode or "onJobFinish"))
     setXMLString(xmlFile, "helperPayrollSave.policy#workerTimeBasis", tostring(self.settings.workerTimeBasis or "gameClock"))
+    setXMLFloat(xmlFile, "helperPayrollSave.policy#maxPayrollTimeScale", tonumber(self.settings.maxPayrollTimeScale) or 10)
     setXMLInt(xmlFile, "helperPayrollSave.policy#payrollHour", math.floor(tonumber(self.settings.payrollHour) or 18))
     setXMLFloat(xmlFile, "helperPayrollSave.policy#minimumWorkerCharge", tonumber(self.settings.minimumWorkerCharge) or 0)
     setXMLFloat(xmlFile, "helperPayrollSave.policy#workerCalloutFee", tonumber(self.settings.workerCalloutFee) or 0)
@@ -5591,7 +5598,7 @@ function HelperPayroll:printSaveSettingsStatus()
         tostring(self.persistence ~= nil and self.persistence.savegameName or "unknown"),
         tostring(self.persistence ~= nil and self.persistence.filePath or "nil"),
         tostring(self.persistence ~= nil and self.persistence.loaded == true))
-    hpayPrintf("Effective active values: payrollMode=%s billingMode=%s timeBasis=%s profile=%s selectedRole=%s name=%s rate=%.2f fallbackRole=%s minimum=%.2f callout=%.2f payrollHour=%s round=%s helperProfilesMappings=%d",
+    hpayPrintf("Effective active values: payrollMode=%s billingMode=%s timeBasis=%s maxPayrollTimeScale=%s profile=%s selectedRole=%s name=%s rate=%.2f fallbackRole=%s minimum=%.2f callout=%.2f payrollHour=%s round=%s helperProfilesMappings=%d",
         tostring(self.settings.payrollMode), tostring(self.settings.billingMode), tostring(self.settings.workerTimeBasis), tostring(profileId), tostring(roleId), tostring(roleName), tonumber(rate) or 0, tostring(self.settings.fallbackRole), tonumber(self.settings.minimumWorkerCharge) or 0, tonumber(self.settings.workerCalloutFee) or 0, tostring(self.settings.payrollHour), tostring(self.settings.roundWorkerCharges), #(self.helperProfilesMappings or {}))
 end
 
