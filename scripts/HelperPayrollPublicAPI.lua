@@ -39,6 +39,7 @@ function HelperPayrollPublicAPI.build(owner)
             activePayrollProfile = tostring(owner.settings.activePayrollProfile or "default"),
             payrollMode = tostring(owner.settings.payrollMode or "roleType"),
             billingMode = tostring(owner.settings.billingMode or "onJobFinish"),
+            workerTimeBasis = tostring(owner.settings.workerTimeBasis or "gameClock"),
             managedSlotCount = owner:getManagedHelperSlotCount(),
             enabledSlotCount = tonumber(roster.enabled) or owner:getManagedHelperSlotCount(),
             disabledSlotCount = tonumber(roster.disabled) or 0,
