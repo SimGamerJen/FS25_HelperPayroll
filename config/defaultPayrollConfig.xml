@@ -21,6 +21,7 @@
 
         <chargeCustomWorkerCosts>true</chargeCustomWorkerCosts>
         <billingMode>onJobFinish</billingMode>
+        <workerTimeBasis>gameClock</workerTimeBasis>
         <payrollHour>18</payrollHour>
         <minimumWorkerCharge>5.00</minimumWorkerCharge>
         <workerCalloutFee>0.00</workerCalloutFee>
