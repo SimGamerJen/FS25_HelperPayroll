@@ -5,6 +5,7 @@
 -- (legacy compatibility). Game-clock mode validates observed environment-clock
 -- movement against the mission's effective time scale so normal fast-forward
 -- counts while discontinuous jumps such as sleep/period skips only re-anchor.
+-- Billable acceleration can be capped independently from the actual game speed.
 
 HelperPayrollWorkClock = HelperPayrollWorkClock or {}
 
@@ -176,7 +177,7 @@ function HelperPayrollWorkClock.accrue(owner, tracked, dt)
     if actualDelta <= 0 then
         if effectiveScale <= 0 then
             tracked.expectedGameDeltaMs = 0
-        tracked.expectedBillableDeltaMs = 0
+            tracked.expectedBillableDeltaMs = 0
             return 0, "paused"
         end
         return 0, "clock-wait"
