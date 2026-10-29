@@ -161,6 +161,18 @@ Completed work is accumulated and settled at the configured in-game payroll hour
 
 `dailyPayroll` controls settlement timing; it does not force every role to use daily compensation.
 
+## Worker Time Basis
+
+HelperPayroll now defaults worker-hour accounting to the **in-game clock**.
+
+- `gameClock` (default): wages accrue from Farming Simulator's in-game time. Deliberate time acceleration therefore increases payroll proportionally while workers remain active.
+- `realTime`: legacy behaviour; wages accrue from real frame time and ignore game-speed acceleration.
+- Paused game time does not accrue `gameClock` wages.
+- Discontinuous jumps such as sleep, period skips, clock rollbacks, or other time resets re-anchor the worker timer instead of creating windfall charges.
+- Jobs that cross midnight are split across the relevant game days for `dailyPayroll`.
+
+Normal accelerated clock movement is validated against the mission's effective time scale, so 10×/60×/120× fieldwork remains billable while unrelated instantaneous clock jumps are rejected.
+
 ## Management Screen
 
 Open the screen with:
@@ -174,7 +186,7 @@ The screen contains six tabs:
 | Tab | Purpose |
 |---|---|
 | **Overview** | Shows active profile, modes, selected role, integration status, pending payroll, and save path. |
-| **Billing** | Edits payroll mode, billing mode, payroll hour, legacy minimum, global call-out fee, and rounding. |
+| **Billing** | Edits payroll mode, billing mode, worker time basis, payroll hour, legacy minimum, global call-out fee, and rounding. |
 | **Roles** | Edits each role's pay basis, rate, and minimum call-out. |
 | **Workers** | Assigns roles and configures inherited or custom worker compensation for the managed roster. |
 | **Ledger** | Displays persistent payroll totals. |
@@ -245,6 +257,7 @@ The file contains:
 
 - Active payroll profile.
 - Payroll and billing modes.
+- Worker time basis (`gameClock` or legacy `realTime`).
 - Role compensation policies.
 - Worker-role mappings.
 - Worker compensation overrides.
@@ -336,6 +349,7 @@ Role IDs must be unique and non-empty. Save-specific role definitions are preser
         <selectedRole>standard</selectedRole>
         <fallbackRole>standard</fallbackRole>
         <billingMode>dailyPayroll</billingMode>
+        <workerTimeBasis>gameClock</workerTimeBasis>
         <payrollHour>18</payrollHour>
         <workerCalloutFee>0.00</workerCalloutFee>
         <roundWorkerCharges>true</roundWorkerCharges>
