@@ -3751,6 +3751,9 @@ function HelperPayroll:scanActiveAIJobs(dt)
 
             local assignment = self:captureWorkerAssignment(self.trackedAIJobs[jobId])
             self.trackedAIJobs[jobId].assignmentSnapshot = assignment
+            if HelperPayrollWorkClock ~= nil and HelperPayrollWorkClock.initialise ~= nil then
+                HelperPayrollWorkClock.initialise(self, self.trackedAIJobs[jobId])
+            end
             self.trackedAIJobs[jobId].helperSlot = assignment.helperSlot
             self.trackedAIJobs[jobId].helperSlotSource = assignment.helperSlotSource
             self.trackedAIJobs[jobId].helperSlotUsedForPayroll = assignment.helperSlotUsedForPayroll
@@ -3760,18 +3763,25 @@ function HelperPayroll:scanActiveAIJobs(dt)
         end
 
         local tracked = self.trackedAIJobs[jobId]
-        tracked.elapsedMs = (tracked.elapsedMs or 0) + (dt or 0)
+        if HelperPayrollWorkClock ~= nil and HelperPayrollWorkClock.accrue ~= nil then
+            HelperPayrollWorkClock.accrue(self, tracked, dt)
+        else
+            tracked.elapsedMs = (tracked.elapsedMs or 0) + (dt or 0)
+        end
 
         -- Duration tracking and active summary. Billing is applied when the job finishes.
         if tracked.elapsedMs - (tracked.lastSummaryMs or 0) >= 60000 then
             tracked.lastSummaryMs = tracked.elapsedMs
             rcLog(
-                "AI job active summary: seq=%s id=%s type=%s helperSlot=%s elapsedMinutes=%.1f customBilling=%s",
+                "AI job active summary: seq=%s id=%s type=%s helperSlot=%s elapsedMinutes=%.1f timeBasis=%s effectiveScale=%.1f discontinuities=%d customBilling=%s",
                 tostring(tracked.sequence),
                 tostring(jobId),
                 tostring(tracked.name),
                 tostring(tracked.helperSlot or "unassigned"),
                 (tracked.elapsedMs or 0) / 60000,
+                tostring(tracked.timeBasis or self.settings.workerTimeBasis or "gameClock"),
+                tonumber(tracked.lastEffectiveTimeScale) or 0,
+                tonumber(tracked.clockDiscontinuities) or 0,
                 tostring(self.settings.enableCustomWorkerCosts and self.settings.chargeCustomWorkerCosts)
             )
         end
