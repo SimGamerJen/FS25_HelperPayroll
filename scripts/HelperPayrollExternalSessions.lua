@@ -313,7 +313,7 @@ function HelperPayrollExternalSessions:update(dt)
             session.lastSummaryMs = session.elapsedMs
             local assignment = session.assignmentSnapshot or {}
             log(
-                "Active: id=%s controller=%s helperSlot=%s helper=%s elapsedMinutes=%.1f timeBasis=%s effectiveScale=%.1f discontinuities=%d",
+                "Active: id=%s controller=%s helperSlot=%s helper=%s elapsedMinutes=%.1f timeBasis=%s effectiveScale=%.1f billableScale=%.1f discontinuities=%d",
                 tostring(session.sessionId),
                 tostring(session.controller),
                 tostring(assignment.helperSlot or "unassigned"),
@@ -321,6 +321,7 @@ function HelperPayrollExternalSessions:update(dt)
                 session.elapsedMs / 60000,
                 tostring(session.timeBasis or (HelperPayroll ~= nil and HelperPayroll.settings ~= nil and HelperPayroll.settings.workerTimeBasis) or "gameClock"),
                 tonumber(session.lastEffectiveTimeScale) or 0,
+                tonumber(session.lastBillableTimeScale) or 0,
                 tonumber(session.clockDiscontinuities) or 0
             )
         end
