@@ -85,8 +85,10 @@ function HelperPayrollWorkClock.initialise(owner, tracked)
     tracked.elapsedMs = tonumber(tracked.elapsedMs) or 0
     tracked.realElapsedMs = tonumber(tracked.realElapsedMs) or 0
     tracked.gameElapsedMs = tonumber(tracked.gameElapsedMs) or 0
+    tracked.billableGameElapsedMs = tonumber(tracked.billableGameElapsedMs) or 0
     tracked.clockDiscontinuities = tonumber(tracked.clockDiscontinuities) or 0
     tracked.expectedGameDeltaMs = tonumber(tracked.expectedGameDeltaMs) or 0
+    tracked.expectedBillableDeltaMs = tonumber(tracked.expectedBillableDeltaMs) or 0
     tracked.workSegments = tracked.workSegments or {}
 
     local clock = getClock(owner)
@@ -99,6 +101,7 @@ function HelperPayrollWorkClock.reanchor(owner, tracked)
     tracked.workClockAnchor = copyAnchor(getClock(owner))
     tracked.lastEffectiveTimeScale = getEffectiveTimeScale()
     tracked.expectedGameDeltaMs = 0
+    tracked.expectedBillableDeltaMs = 0
 end
 
 function HelperPayrollWorkClock.accrue(owner, tracked, dt)
@@ -124,11 +127,18 @@ function HelperPayrollWorkClock.accrue(owner, tracked, dt)
     local previous = tracked.workClockAnchor
     tracked.workClockAnchor = current
     local effectiveScale = getEffectiveTimeScale()
+    local configuredCap = tonumber(owner ~= nil and owner.settings ~= nil and owner.settings.maxPayrollTimeScale or 10) or 10
+    local billableScale = configuredCap > 0 and math.min(effectiveScale, configuredCap) or effectiveScale
+
     tracked.lastEffectiveTimeScale = effectiveScale
+    tracked.lastBillableTimeScale = billableScale
+    tracked.maxPayrollTimeScale = configuredCap
     tracked.expectedGameDeltaMs = (tonumber(tracked.expectedGameDeltaMs) or 0) + realDelta * effectiveScale
+    tracked.expectedBillableDeltaMs = (tonumber(tracked.expectedBillableDeltaMs) or 0) + realDelta * billableScale
 
     if previous == nil then
         tracked.expectedGameDeltaMs = 0
+        tracked.expectedBillableDeltaMs = 0
         return 0, "anchored"
     end
 
@@ -136,6 +146,7 @@ function HelperPayrollWorkClock.accrue(owner, tracked, dt)
     if dayDiff < 0 or dayDiff > 1 then
         tracked.clockDiscontinuities = (tonumber(tracked.clockDiscontinuities) or 0) + 1
         tracked.expectedGameDeltaMs = 0
+        tracked.expectedBillableDeltaMs = 0
         return 0, "day-discontinuity"
     end
 
@@ -144,6 +155,7 @@ function HelperPayrollWorkClock.accrue(owner, tracked, dt)
     if actualDelta < 0 then
         tracked.clockDiscontinuities = (tonumber(tracked.clockDiscontinuities) or 0) + 1
         tracked.expectedGameDeltaMs = 0
+        tracked.expectedBillableDeltaMs = 0
         return 0, "clock-rollback"
     end
 
@@ -157,30 +169,41 @@ function HelperPayrollWorkClock.accrue(owner, tracked, dt)
     if actualDelta > maximumExpected then
         tracked.clockDiscontinuities = (tonumber(tracked.clockDiscontinuities) or 0) + 1
         tracked.expectedGameDeltaMs = 0
+        tracked.expectedBillableDeltaMs = 0
         return 0, "clock-jump"
     end
 
     if actualDelta <= 0 then
         if effectiveScale <= 0 then
             tracked.expectedGameDeltaMs = 0
+        tracked.expectedBillableDeltaMs = 0
             return 0, "paused"
         end
         return 0, "clock-wait"
     end
 
+    local expectedGameDelta = tonumber(tracked.expectedGameDeltaMs) or 0
+    local expectedBillableDelta = tonumber(tracked.expectedBillableDeltaMs) or 0
+    local billableRatio = expectedGameDelta > 0 and math.min(1, expectedBillableDelta / expectedGameDelta) or 1
+    local billableDelta = actualDelta * billableRatio
+
     if dayDiff == 0 then
-        addSegment(tracked, previous.dateKey, previous.monotonicDay, actualDelta)
+        addSegment(tracked, previous.dateKey, previous.monotonicDay, billableDelta)
     else
         local beforeMidnight = math.max(0, HelperPayrollWorkClock.DAY_MS - previous.dayTimeMs)
         local afterMidnight = math.max(0, current.dayTimeMs)
-        addSegment(tracked, previous.dateKey, previous.monotonicDay, beforeMidnight)
-        addSegment(tracked, current.dateKey, current.monotonicDay, afterMidnight)
+        local beforeRatio = actualDelta > 0 and beforeMidnight / actualDelta or 0
+        local afterRatio = actualDelta > 0 and afterMidnight / actualDelta or 0
+        addSegment(tracked, previous.dateKey, previous.monotonicDay, billableDelta * beforeRatio)
+        addSegment(tracked, current.dateKey, current.monotonicDay, billableDelta * afterRatio)
     end
 
     tracked.gameElapsedMs = (tonumber(tracked.gameElapsedMs) or 0) + actualDelta
-    tracked.elapsedMs = tracked.gameElapsedMs
+    tracked.billableGameElapsedMs = (tonumber(tracked.billableGameElapsedMs) or 0) + billableDelta
+    tracked.elapsedMs = tracked.billableGameElapsedMs
     tracked.expectedGameDeltaMs = 0
-    return actualDelta, "gameClock"
+    tracked.expectedBillableDeltaMs = 0
+    return billableDelta, "gameClock"
 end
 
 function HelperPayrollWorkClock.getSegments(tracked)
@@ -209,7 +232,10 @@ function HelperPayrollWorkClock.getDiagnostics(tracked)
         elapsedMs = tonumber(tracked ~= nil and tracked.elapsedMs or 0) or 0,
         realElapsedMs = tonumber(tracked ~= nil and tracked.realElapsedMs or 0) or 0,
         gameElapsedMs = tonumber(tracked ~= nil and tracked.gameElapsedMs or 0) or 0,
+        billableGameElapsedMs = tonumber(tracked ~= nil and tracked.billableGameElapsedMs or 0) or 0,
         discontinuities = tonumber(tracked ~= nil and tracked.clockDiscontinuities or 0) or 0,
-        effectiveTimeScale = tonumber(tracked ~= nil and tracked.lastEffectiveTimeScale or 0) or 0
+        effectiveTimeScale = tonumber(tracked ~= nil and tracked.lastEffectiveTimeScale or 0) or 0,
+        billableTimeScale = tonumber(tracked ~= nil and tracked.lastBillableTimeScale or 0) or 0,
+        maxPayrollTimeScale = tonumber(tracked ~= nil and tracked.maxPayrollTimeScale or 0) or 0
     }
 end
