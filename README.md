@@ -165,13 +165,14 @@ Completed work is accumulated and settled at the configured in-game payroll hour
 
 HelperPayroll now defaults worker-hour accounting to the **in-game clock**.
 
-- `gameClock` (default): wages accrue from Farming Simulator's in-game time. Deliberate time acceleration therefore increases payroll proportionally while workers remain active.
+- `gameClock` (default): wages accrue from Farming Simulator's in-game time. Deliberate time acceleration therefore increases payroll while workers remain active.
+- `maxPayrollTimeScale` caps the **billable** acceleration. The default is `10`, so 30×, 60× or 360× gameplay is still recognised as valid accelerated time but wages accrue no faster than 10×. Set `0` for unlimited game-clock billing.
 - `realTime`: legacy behaviour; wages accrue from real frame time and ignore game-speed acceleration.
 - Paused game time does not accrue `gameClock` wages.
 - Discontinuous jumps such as sleep, period skips, clock rollbacks, or other time resets re-anchor the worker timer instead of creating windfall charges.
 - Jobs that cross midnight are split across the relevant game days for `dailyPayroll`.
 
-Normal accelerated clock movement is validated against the mission's effective time scale, so 10×/60×/120× fieldwork remains billable while unrelated instantaneous clock jumps are rejected.
+Normal accelerated clock movement is validated against the mission's **actual** effective time scale, while payroll uses the configured billable cap. This keeps fast-forward economically meaningful without allowing extreme 360× speeds to create disproportionate wages.
 
 ## Management Screen
 
@@ -257,7 +258,7 @@ The file contains:
 
 - Active payroll profile.
 - Payroll and billing modes.
-- Worker time basis (`gameClock` or legacy `realTime`).
+- Worker time basis (`gameClock` or legacy `realTime`) and maximum billable payroll time scale.
 - Role compensation policies.
 - Worker-role mappings.
 - Worker compensation overrides.
@@ -350,6 +351,7 @@ Role IDs must be unique and non-empty. Save-specific role definitions are preser
         <fallbackRole>standard</fallbackRole>
         <billingMode>dailyPayroll</billingMode>
         <workerTimeBasis>gameClock</workerTimeBasis>
+        <maxPayrollTimeScale>10</maxPayrollTimeScale>
         <payrollHour>18</payrollHour>
         <workerCalloutFee>0.00</workerCalloutFee>
         <roundWorkerCharges>true</roundWorkerCharges>
