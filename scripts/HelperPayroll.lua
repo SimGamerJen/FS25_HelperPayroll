@@ -3843,7 +3843,7 @@ function HelperPayroll:scanActiveAIJobs(dt)
         if tracked.elapsedMs - (tracked.lastSummaryMs or 0) >= 60000 then
             tracked.lastSummaryMs = tracked.elapsedMs
             rcLog(
-                "AI job active summary: seq=%s id=%s type=%s helperSlot=%s elapsedMinutes=%.1f timeBasis=%s effectiveScale=%.1f discontinuities=%d customBilling=%s",
+                "AI job active summary: seq=%s id=%s type=%s helperSlot=%s elapsedMinutes=%.1f timeBasis=%s effectiveScale=%.1f billableScale=%.1f discontinuities=%d customBilling=%s",
                 tostring(tracked.sequence),
                 tostring(jobId),
                 tostring(tracked.name),
@@ -3851,6 +3851,7 @@ function HelperPayroll:scanActiveAIJobs(dt)
                 (tracked.elapsedMs or 0) / 60000,
                 tostring(tracked.timeBasis or self.settings.workerTimeBasis or "gameClock"),
                 tonumber(tracked.lastEffectiveTimeScale) or 0,
+                tonumber(tracked.lastBillableTimeScale) or 0,
                 tonumber(tracked.clockDiscontinuities) or 0,
                 tostring(self.settings.enableCustomWorkerCosts and self.settings.chargeCustomWorkerCosts)
             )
