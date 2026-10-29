@@ -176,6 +176,7 @@ function HelperPayrollMenu:refreshDraftFromRuntime()
     self.draftWorkerOverrides = {}
     if hp ~= nil and hp.settings ~= nil then
         self.draftSettings.billingMode = hp.settings.billingMode or "onJobFinish"
+        self.draftSettings.workerTimeBasis = hp.settings.workerTimeBasis or "gameClock"
         self.draftSettings.payrollHour = tonumber(hp.settings.payrollHour) or 18
         self.draftSettings.minimumWorkerCharge = tonumber(hp.settings.minimumWorkerCharge) or 0
         self.draftSettings.workerCalloutFee = tonumber(hp.settings.workerCalloutFee) or 0
@@ -326,6 +327,7 @@ function HelperPayrollMenu:buildRows()
         rows = {
             {id="payrollMode", label="Payroll mode", value=tostring(self.draftSettings.payrollMode or "roleType"), status="Editable", source="Savegame", editType="option", options={"roleType", "helperSlot"}, info="roleType assigns every new job to the selected payroll role. helperSlot uses the deployed A-T worker, with live HelperProfiles identity data when available."},
             {id="billingMode", label="Billing mode", value=tostring(self.draftSettings.billingMode or "onJobFinish"), status="Editable", source="Savegame", editType="option", options={"onJobFinish", "dailyPayroll"}, info="onJobFinish charges each completed job immediately. dailyPayroll aggregates each worker's completed work for the game day and settles it through payroll."},
+            {id="workerTimeBasis", label="Worker time basis", value=tostring(self.draftSettings.workerTimeBasis or "gameClock"), status="Editable", source="Savegame", editType="option", options={"gameClock", "realTime"}, info="gameClock pays workers for in-game hours, so deliberate time acceleration increases payroll. realTime preserves legacy frame-time accounting. Sleep and discontinuous clock jumps are ignored in gameClock mode."},
             {id="payrollHour", label="Payroll hour", value=fmtHour(self.draftSettings.payrollHour), status="Editable", source="Savegame", editType="number", step=1, min=0, max=23, info="In dailyPayroll mode, pending rows settle at this in-game hour. Any unpaid row from an earlier game day is treated as overdue and settles automatically."},
             {id="minimumWorkerCharge", label="Legacy minimum", value=fmtMoney(self.draftSettings.minimumWorkerCharge), status="Editable", source="Savegame", editType="number", step=0.5, min=0, max=999, info="Compatibility fallback for old save data that has no per-role minimum. New payroll policies use the minimum call-out configured on each role or worker."},
             {id="workerCalloutFee", label="Callout fee", value=fmtMoney(self.draftSettings.workerCalloutFee), status="Editable", source="Savegame", editType="number", step=0.5, min=0, max=999, info="Flat callout fee: per job in onJobFinish mode, or once per worker and workday in dailyPayroll mode."},
@@ -495,6 +497,7 @@ function HelperPayrollMenu:getDraftValue(row)
     if row == nil then return nil end
     if row.id == "payrollMode" then return self.draftSettings.payrollMode end
     if row.id == "billingMode" then return self.draftSettings.billingMode end
+    if row.id == "workerTimeBasis" then return self.draftSettings.workerTimeBasis end
     if row.id == "payrollHour" then return self.draftSettings.payrollHour end
     if row.id == "minimumWorkerCharge" then return self.draftSettings.minimumWorkerCharge end
     if row.id == "workerCalloutFee" then return self.draftSettings.workerCalloutFee end
@@ -575,6 +578,7 @@ function HelperPayrollMenu:setDraftValue(row, value)
     self:cancelResetConfirmation()
     if row.id == "payrollMode" then self.draftSettings.payrollMode = tostring(value)
     elseif row.id == "billingMode" then self.draftSettings.billingMode = tostring(value)
+    elseif row.id == "workerTimeBasis" then self.draftSettings.workerTimeBasis = tostring(value)
     elseif row.id == "payrollHour" then self.draftSettings.payrollHour = tonumber(value) or 0
     elseif row.id == "minimumWorkerCharge" then self.draftSettings.minimumWorkerCharge = tonumber(value) or 0
     elseif row.id == "workerCalloutFee" then self.draftSettings.workerCalloutFee = tonumber(value) or 0
