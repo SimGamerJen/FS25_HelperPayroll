@@ -3377,6 +3377,50 @@ function HelperPayroll:processDailyPayroll(dt, force, triggerReason)
 end
 
 
+function HelperPayroll:buildDailyPayrollEntries(tracked, baseEntry)
+    local segments = HelperPayrollWorkClock ~= nil and HelperPayrollWorkClock.getSegments ~= nil
+        and HelperPayrollWorkClock.getSegments(tracked) or {}
+
+    if #segments == 0 then
+        return {baseEntry}
+    end
+
+    local rows = {}
+    local payBasis = self:normalisePayBasis(baseEntry.payBasis)
+    local payRate = tonumber(baseEntry.payRate or baseEntry.hourlyRate) or 0
+    local calloutFee = payBasis == "daily" and 0 or (tonumber(self.settings.workerCalloutFee) or 0)
+    local minimumCharge = payBasis == "daily" and 0
+        or (tonumber(baseEntry.minimumCallout) or tonumber(self.settings.minimumWorkerCharge) or 0)
+
+    for _, segment in ipairs(segments) do
+        local row = {}
+        for key, value in pairs(baseEntry) do row[key] = value end
+
+        local elapsedHours = (tonumber(segment.elapsedMs) or 0) / 3600000
+        local labour = payBasis == "daily" and payRate or elapsedHours * payRate
+        local calculated = labour + calloutFee
+        local minimumApplied = false
+        if calculated > 0 and minimumCharge > 0 and calculated < minimumCharge then
+            calculated = minimumCharge
+            minimumApplied = true
+        end
+
+        row.gameDate = tostring(segment.gameDate or baseEntry.gameDate or self:getGameDateKey())
+        row.workMonotonicDay = tonumber(segment.monotonicDay) or baseEntry.workMonotonicDay
+        row.workDayTime = nil
+        row.elapsedHours = elapsedHours
+        row.labourCharge = self:roundCurrency(labour)
+        row.calloutFee = self:roundCurrency(calloutFee)
+        row.minimumCharge = self:roundCurrency(minimumCharge)
+        row.appliedMinimum = minimumApplied
+        row.calculatedJobCharge = self:roundCurrency(calculated)
+        row.charge = 0
+        table.insert(rows, row)
+    end
+
+    return rows
+end
+
 function HelperPayroll:applyWorkerCharge(tracked)
     if not self:isPayrollRuntimeEnabled() then
         rcWarn("Worker billing skipped because the runtime compatibility safety block is active")
@@ -3443,6 +3487,50 @@ function HelperPayroll:applyWorkerCharge(tracked)
     entry.appliedMinimum = breakdown.appliedMinimum
     self.workerLedger[self.workerLedgerCount] = entry
 
+    if self:isDailyPayrollMode() then
+        local dailyEntries = self:buildDailyPayrollEntries(tracked, entry)
+        local recordedRows = 0
+
+        for _, dailyEntry in ipairs(dailyEntries) do
+            local skipDailyRate = self:hasDailyRateBeenPaid(dailyEntry)
+            if skipDailyRate then
+                dailyEntry.calculatedJobCharge = 0
+                dailyEntry.labourCharge = 0
+                self:recordPersistentLedgerEntry(
+                    self:buildPersistentLedgerEntryFromWorkerEntry(dailyEntry, "daily-rate-already-paid"),
+                    "job-daily-rate-already-paid"
+                )
+            else
+                local daily = self:updateDailyLedger(dailyEntry)
+                recordedRows = recordedRows + 1
+                rcLog(
+                    "Worker billing deferred to daily payroll: seq=%s type=%s helperSlot=%s helper=%s elapsedHours=%.3f rate=%.2f labour=%.2f dailyJobs=%s gameDate=%s payrollHour=%s timeBasis=%s",
+                    tostring(dailyEntry.sequence),
+                    tostring(dailyEntry.jobType),
+                    tostring(dailyEntry.helperSlot),
+                    tostring(dailyEntry.helperName),
+                    tonumber(dailyEntry.elapsedHours) or 0,
+                    tonumber(dailyEntry.hourlyRate) or 0,
+                    tonumber(dailyEntry.labourCharge) or 0,
+                    tostring(daily ~= nil and daily.jobs or "unknown"),
+                    tostring(dailyEntry.gameDate),
+                    tostring(self.settings.payrollHour),
+                    tostring(self.settings.workerTimeBasis or "gameClock")
+                )
+                self:recordPersistentLedgerEntry(
+                    self:buildPersistentLedgerEntryFromWorkerEntry(dailyEntry, "deferred"),
+                    "job-deferred"
+                )
+            end
+        end
+
+        if recordedRows > 0 then
+            self:saveSavegameSettings("daily-payroll-pending")
+            self:processDailyPayroll(0, true, "job-deferred")
+        end
+        return true
+    end
+
     if self:hasDailyRateBeenPaid(entry) then
         entry.calculatedJobCharge = 0
         rcLog("Day-rate worker already paid for workDate=%s helper=%s workerRate=%s; additional job recorded with no extra charge", tostring(entry.gameDate), tostring(entry.helperName), tostring(entry.workerId))
@@ -3460,31 +3548,6 @@ function HelperPayroll:applyWorkerCharge(tracked)
     end
 
     local daily = self:updateDailyLedger(entry)
-
-    if self:isDailyPayrollMode() then
-        rcLog(
-            "Worker billing deferred to daily payroll: seq=%s type=%s payrollMode=%s helperSlot=%s helperSlotUsedForPayroll=%s helper=%s role=%s workerRate=%s profile=%s elapsedHours=%.3f rate=%.2f labour=%.2f dailyJobs=%s gameDate=%s payrollHour=%s",
-            tostring(entry.sequence),
-            tostring(entry.jobType),
-            tostring(entry.payrollMode or self.settings.payrollMode),
-            tostring(entry.helperSlot),
-            tostring(entry.helperSlotUsedForPayroll),
-            tostring(entry.helperName),
-            tostring(entry.helperRole),
-            tostring(entry.workerId),
-            tostring(entry.profileId),
-            tonumber(entry.elapsedHours) or 0,
-            tonumber(entry.hourlyRate) or 0,
-            tonumber(entry.labourCharge) or 0,
-            tostring(daily ~= nil and daily.jobs or "unknown"),
-            tostring(entry.gameDate),
-            tostring(self.settings.payrollHour)
-        )
-        self:recordPersistentLedgerEntry(self:buildPersistentLedgerEntryFromWorkerEntry(entry, "deferred"), "job-deferred")
-        self:saveSavegameSettings("daily-payroll-pending")
-        self:processDailyPayroll(0, true, "job-deferred")
-        return true
-    end
 
     if chargeToApply <= 0 then
         rcLog(
