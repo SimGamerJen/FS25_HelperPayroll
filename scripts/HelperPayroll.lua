@@ -280,6 +280,7 @@ local HPAY_DEFAULT_POLICY_XML = [=[
 
         <chargeCustomWorkerCosts>true</chargeCustomWorkerCosts>
         <billingMode>onJobFinish</billingMode>
+        <workerTimeBasis>gameClock</workerTimeBasis>
         <payrollHour>18</payrollHour>
         <minimumWorkerCharge>5.00</minimumWorkerCharge>
         <workerCalloutFee>0.00</workerCalloutFee>
@@ -5590,8 +5591,8 @@ function HelperPayroll:printSaveSettingsStatus()
         tostring(self.persistence ~= nil and self.persistence.savegameName or "unknown"),
         tostring(self.persistence ~= nil and self.persistence.filePath or "nil"),
         tostring(self.persistence ~= nil and self.persistence.loaded == true))
-    hpayPrintf("Effective active values: payrollMode=%s billingMode=%s profile=%s selectedRole=%s name=%s rate=%.2f fallbackRole=%s minimum=%.2f callout=%.2f payrollHour=%s round=%s helperProfilesMappings=%d",
-        tostring(self.settings.payrollMode), tostring(self.settings.billingMode), tostring(profileId), tostring(roleId), tostring(roleName), tonumber(rate) or 0, tostring(self.settings.fallbackRole), tonumber(self.settings.minimumWorkerCharge) or 0, tonumber(self.settings.workerCalloutFee) or 0, tostring(self.settings.payrollHour), tostring(self.settings.roundWorkerCharges), #(self.helperProfilesMappings or {}))
+    hpayPrintf("Effective active values: payrollMode=%s billingMode=%s timeBasis=%s profile=%s selectedRole=%s name=%s rate=%.2f fallbackRole=%s minimum=%.2f callout=%.2f payrollHour=%s round=%s helperProfilesMappings=%d",
+        tostring(self.settings.payrollMode), tostring(self.settings.billingMode), tostring(self.settings.workerTimeBasis), tostring(profileId), tostring(roleId), tostring(roleName), tonumber(rate) or 0, tostring(self.settings.fallbackRole), tonumber(self.settings.minimumWorkerCharge) or 0, tonumber(self.settings.workerCalloutFee) or 0, tostring(self.settings.payrollHour), tostring(self.settings.roundWorkerCharges), #(self.helperProfilesMappings or {}))
 end
 
 function HelperPayroll:hpayConfig(...)
