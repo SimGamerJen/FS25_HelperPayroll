@@ -5,7 +5,7 @@
 -- server-to-client transport without changing consumers.
 
 HelperPayrollSnapshot = HelperPayrollSnapshot or {}
-HelperPayrollSnapshot.SCHEMA_VERSION = 3
+HelperPayrollSnapshot.SCHEMA_VERSION = 4
 
 local function round(value, places)
     local n = tonumber(value) or 0
@@ -68,6 +68,32 @@ local function buildActiveJobs(owner)
     local function appendTracked(tracked, source)
         if tracked == nil then return end
         local estimate, labour, elapsedHours, assignment, payBasis, payRate = estimateTrackedCharge(owner, tracked)
+        local workSegments = {}
+        if HelperPayrollWorkClock ~= nil and HelperPayrollWorkClock.getSegments ~= nil then
+            for _, segment in ipairs(HelperPayrollWorkClock.getSegments(tracked)) do
+                local segmentHours = (tonumber(segment.elapsedMs) or 0) / 3600000
+                local segmentLabour = payBasis == "daily" and payRate or segmentHours * payRate
+                local segmentCallout = payBasis == "daily" and 0 or tonumber(owner.settings ~= nil and owner.settings.workerCalloutFee or 0) or 0
+                local segmentMinimum = payBasis == "daily" and 0 or tonumber(assignment.minimumCallout or (owner.settings ~= nil and owner.settings.minimumWorkerCharge)) or 0
+                local segmentCharge = segmentLabour + segmentCallout
+                if segmentCharge > 0 and segmentMinimum > 0 and segmentCharge < segmentMinimum then
+                    segmentCharge = segmentMinimum
+                end
+                table.insert(workSegments, {
+                    gameDate = tostring(segment.gameDate or assignment.gameDate or "unknown"),
+                    monotonicDay = tonumber(segment.monotonicDay),
+                    elapsedHours = round(segmentHours, 3),
+                    labourEstimate = round(segmentLabour, 2),
+                    chargeEstimate = round(segmentCharge, 2)
+                })
+            end
+        end
+
+        local currentGameDate = assignment.gameDate
+        if #workSegments > 0 then
+            currentGameDate = workSegments[#workSegments].gameDate
+        end
+
         table.insert(jobs, {
             sequence = tonumber(tracked.sequence) or 0,
             source = tostring(source or (tracked.external == true and "external" or "giants-ai")),
@@ -91,7 +117,8 @@ local function buildActiveJobs(owner)
             chargeEstimate = estimate,
             farmId = tonumber(assignment.farmId) or assignment.farmId,
             farmIdSource = tostring(assignment.farmIdSource or "unknown"),
-            gameDate = assignment.gameDate,
+            gameDate = currentGameDate,
+            workSegments = workSegments,
             snapshotSource = tostring(assignment.snapshotSource or "runtime"),
             vehicleName = tracked.metadata ~= nil and tracked.metadata.vehicleName or nil
         })
