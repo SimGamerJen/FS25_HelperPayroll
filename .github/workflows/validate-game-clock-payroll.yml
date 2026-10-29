@@ -1,0 +1,176 @@
+name: Validate game-clock payroll
+
+on:
+  push:
+    branches:
+      - feature/game-clock-payroll
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@v4
+
+      - name: Install Lua
+        run: sudo apt-get update && sudo apt-get install -y lua5.4
+
+      - name: Validate XML and policy wiring
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          ET.parse('modDesc.xml')
+          ET.parse('config/defaultPayrollConfig.xml')
+          ET.parse('gui/HelperPayrollMenu.xml')
+          ET.parse('gui/guiProfiles.xml')
+
+          mod_desc = Path('modDesc.xml').read_text(encoding='utf-8')
+          main = Path('scripts/HelperPayroll.lua').read_text(encoding='utf-8')
+          clock = Path('scripts/HelperPayrollWorkClock.lua').read_text(encoding='utf-8')
+          menu = Path('scripts/gui/HelperPayrollMenu.lua').read_text(encoding='utf-8')
+          snapshot = Path('scripts/HelperPayrollSnapshot.lua').read_text(encoding='utf-8')
+          config = Path('config/defaultPayrollConfig.xml').read_text(encoding='utf-8')
+
+          checks = {
+              'work clock source loaded': 'scripts/HelperPayrollWorkClock.lua' in mod_desc,
+              'default time basis': '<workerTimeBasis>gameClock</workerTimeBasis>' in config,
+              'runtime setting': 'workerTimeBasis = "gameClock"' in main,
+              'savegame persistence': 'helperPayrollSave.policy#workerTimeBasis' in main,
+              'management UI': 'id="workerTimeBasis"' in menu,
+              'effective time scale': 'getEffectiveTimeScale' in clock,
+              'midnight segments': 'workSegments' in clock and 'buildDailyPayrollEntries' in main,
+              'snapshot schema v4': 'SCHEMA_VERSION = 4' in snapshot,
+              'snapshot diagnostics': 'clockDiscontinuities' in snapshot,
+          }
+          failed = [name for name, ok in checks.items() if not ok]
+          if failed:
+              raise SystemExit('Validation failed: ' + ', '.join(failed))
+          PY
+
+      - name: Validate Lua syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          find scripts -name '*.lua' -print0 | while IFS= read -r -d '' file; do
+            luac -p "$file"
+          done
+
+      - name: Test work-clock accounting
+        shell: bash
+        run: |
+          set -euo pipefail
+          lua <<'LUA'
+          dofile("scripts/HelperPayrollWorkClock.lua")
+
+          local DAY = 24 * 60 * 60 * 1000
+          local scale = 1
+          local clock = {monotonicDay=10, dayTimeMs=8*3600000, dateKey="Y1-M01-D10"}
+          g_currentMission = {
+              timeScale = 1,
+              getEffectiveTimeScale = function() return scale end
+          }
+
+          local owner = {
+              settings = {workerTimeBasis="gameClock"},
+              getGameClockSnapshot = function() return {
+                  monotonicDay=clock.monotonicDay,
+                  dayTimeMs=clock.dayTimeMs,
+                  dateKey=clock.dateKey
+              } end
+          }
+
+          local function near(a,b,label)
+              if math.abs((a or 0)-(b or 0)) > 0.001 then
+                  error(string.format("%s: expected %.3f got %.3f", label, b, a or -1))
+              end
+          end
+
+          local t = {}
+          HelperPayrollWorkClock.initialise(owner,t)
+
+          clock.dayTimeMs = clock.dayTimeMs + 1000
+          HelperPayrollWorkClock.accrue(owner,t,1000)
+          near(t.elapsedMs,1000,"1x second")
+
+          scale = 10
+          clock.dayTimeMs = clock.dayTimeMs + 10000
+          HelperPayrollWorkClock.accrue(owner,t,1000)
+          near(t.elapsedMs,11000,"10x second")
+
+          scale = 120
+          clock.dayTimeMs = clock.dayTimeMs + 120000
+          HelperPayrollWorkClock.accrue(owner,t,1000)
+          near(t.elapsedMs,131000,"120x second")
+
+          scale = 0
+          HelperPayrollWorkClock.accrue(owner,t,1000)
+          near(t.elapsedMs,131000,"pause")
+
+          scale = 1
+          clock.dayTimeMs = clock.dayTimeMs + 8*3600000
+          local delta, reason = HelperPayrollWorkClock.accrue(owner,t,1000)
+          near(delta,0,"sleep jump ignored")
+          if reason ~= "clock-jump" then error("sleep jump reason=" .. tostring(reason)) end
+          if (t.clockDiscontinuities or 0) ~= 1 then error("sleep jump discontinuity not counted") end
+
+          clock.dayTimeMs = clock.dayTimeMs + 1000
+          HelperPayrollWorkClock.accrue(owner,t,1000)
+          near(t.elapsedMs,132000,"post jump resumes")
+
+          -- Batched clock updates: two frames with no visible clock motion, then a 3-second step.
+          local b = {}
+          clock = {monotonicDay=20, dayTimeMs=9*3600000, dateKey="Y1-M01-D20"}
+          scale = 1
+          HelperPayrollWorkClock.initialise(owner,b)
+          HelperPayrollWorkClock.accrue(owner,b,1000)
+          HelperPayrollWorkClock.accrue(owner,b,1000)
+          clock.dayTimeMs = clock.dayTimeMs + 3000
+          HelperPayrollWorkClock.accrue(owner,b,1000)
+          near(b.elapsedMs,3000,"batched clock update")
+
+          -- Midnight split: 23:50 -> 00:10 next day at 120x over ten real seconds.
+          local m = {}
+          clock = {monotonicDay=30, dayTimeMs=23*3600000+50*60000, dateKey="Y1-M01-D30"}
+          scale = 120
+          HelperPayrollWorkClock.initialise(owner,m)
+          clock = {monotonicDay=31, dayTimeMs=10*60000, dateKey="Y1-M01-D31"}
+          HelperPayrollWorkClock.accrue(owner,m,10000)
+          near(m.elapsedMs,20*60000,"midnight elapsed")
+          local segments = HelperPayrollWorkClock.getSegments(m)
+          if #segments ~= 2 then error("expected 2 midnight segments, got " .. tostring(#segments)) end
+          near(segments[1].elapsedMs,10*60000,"pre-midnight segment")
+          near(segments[2].elapsedMs,10*60000,"post-midnight segment")
+
+          -- Legacy real-time mode ignores accelerated game clock.
+          local r = {}
+          owner.settings.workerTimeBasis = "realTime"
+          clock = {monotonicDay=40, dayTimeMs=12*3600000, dateKey="Y1-M01-D40"}
+          scale = 120
+          HelperPayrollWorkClock.initialise(owner,r)
+          clock.dayTimeMs = clock.dayTimeMs + 120000
+          HelperPayrollWorkClock.accrue(owner,r,1000)
+          near(r.elapsedMs,1000,"legacy real time")
+          LUA
+
+      - name: Build test package
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f FS25_HelperPayroll.zip
+          zip -r FS25_HelperPayroll.zip modDesc.xml HelperPayroll_icon.dds config gui scripts -x '*.DS_Store' '*__MACOSX*'
+
+      - name: Upload test package
+        uses: actions/upload-artifact@v4
+        with:
+          name: FS25_HelperPayroll-game-clock-test
+          path: FS25_HelperPayroll.zip
+          if-no-files-found: error
+          retention-days: 7
