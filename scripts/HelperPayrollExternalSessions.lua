@@ -158,7 +158,12 @@ local function makeResult(session, status)
         roleId = assignment.workerId,
         payBasis = assignment.payBasis,
         payRate = assignment.payRate,
-        elapsedHours = session ~= nil and ((tonumber(session.elapsedMs) or 0) / 3600000) or 0
+        elapsedHours = session ~= nil and ((tonumber(session.elapsedMs) or 0) / 3600000) or 0,
+        realElapsedHours = session ~= nil and ((tonumber(session.realElapsedMs) or 0) / 3600000) or 0,
+        gameElapsedHours = session ~= nil and ((tonumber(session.gameElapsedMs) or 0) / 3600000) or 0,
+        timeBasis = session ~= nil and tostring(session.timeBasis or "unknown") or "unknown",
+        effectiveTimeScale = session ~= nil and (tonumber(session.lastEffectiveTimeScale) or 0) or 0,
+        clockDiscontinuities = session ~= nil and (tonumber(session.clockDiscontinuities) or 0) or 0
     }
 end
 
