@@ -42,7 +42,9 @@ jobs:
           checks = {
               'work clock source loaded': 'scripts/HelperPayrollWorkClock.lua' in mod_desc,
               'default time basis': '<workerTimeBasis>gameClock</workerTimeBasis>' in config,
+              'default payroll cap': '<maxPayrollTimeScale>10</maxPayrollTimeScale>' in config,
               'runtime setting': 'workerTimeBasis = "gameClock"' in main,
+              'runtime payroll cap': 'maxPayrollTimeScale = 10' in main,
               'savegame persistence': 'helperPayrollSave.policy#workerTimeBasis' in main,
               'management UI': 'id="workerTimeBasis"' in menu,
               'effective time scale': 'getEffectiveTimeScale' in clock,
@@ -79,7 +81,7 @@ jobs:
           }
 
           local owner = {
-              settings = {workerTimeBasis="gameClock"},
+              settings = {workerTimeBasis="gameClock", maxPayrollTimeScale=10},
               getGameClockSnapshot = function() return {
                   monotonicDay=clock.monotonicDay,
                   dayTimeMs=clock.dayTimeMs,
@@ -108,11 +110,16 @@ jobs:
           scale = 120
           clock.dayTimeMs = clock.dayTimeMs + 120000
           HelperPayrollWorkClock.accrue(owner,t,1000)
-          near(t.elapsedMs,131000,"120x second")
+          near(t.elapsedMs,21000,"120x capped second")
+
+          scale = 360
+          clock.dayTimeMs = clock.dayTimeMs + 360000
+          HelperPayrollWorkClock.accrue(owner,t,1000)
+          near(t.elapsedMs,31000,"360x capped second")
 
           scale = 0
           HelperPayrollWorkClock.accrue(owner,t,1000)
-          near(t.elapsedMs,131000,"pause")
+          near(t.elapsedMs,31000,"pause")
 
           scale = 1
           clock.dayTimeMs = clock.dayTimeMs + 8*3600000
@@ -123,7 +130,7 @@ jobs:
 
           clock.dayTimeMs = clock.dayTimeMs + 1000
           HelperPayrollWorkClock.accrue(owner,t,1000)
-          near(t.elapsedMs,132000,"post jump resumes")
+          near(t.elapsedMs,32000,"post jump resumes")
 
           -- Batched clock updates: two frames with no visible clock motion, then a 3-second step.
           local b = {}
@@ -136,22 +143,33 @@ jobs:
           HelperPayrollWorkClock.accrue(owner,b,1000)
           near(b.elapsedMs,3000,"batched clock update")
 
-          -- Midnight split: 23:50 -> 00:10 next day at 120x over ten real seconds.
+          -- Midnight split at the 10x billable cap: 23:50 -> 00:10 next day.
           local m = {}
           clock = {monotonicDay=30, dayTimeMs=23*3600000+50*60000, dateKey="Y1-M01-D30"}
-          scale = 120
+          scale = 10
           HelperPayrollWorkClock.initialise(owner,m)
           clock = {monotonicDay=31, dayTimeMs=10*60000, dateKey="Y1-M01-D31"}
-          HelperPayrollWorkClock.accrue(owner,m,10000)
+          HelperPayrollWorkClock.accrue(owner,m,120000)
           near(m.elapsedMs,20*60000,"midnight elapsed")
           local segments = HelperPayrollWorkClock.getSegments(m)
           if #segments ~= 2 then error("expected 2 midnight segments, got " .. tostring(#segments)) end
           near(segments[1].elapsedMs,10*60000,"pre-midnight segment")
           near(segments[2].elapsedMs,10*60000,"post-midnight segment")
 
+          -- Unlimited cap restores full accelerated game-clock billing.
+          local u = {}
+          owner.settings.maxPayrollTimeScale = 0
+          clock = {monotonicDay=35, dayTimeMs=12*3600000, dateKey="Y1-M01-D35"}
+          scale = 120
+          HelperPayrollWorkClock.initialise(owner,u)
+          clock.dayTimeMs = clock.dayTimeMs + 120000
+          HelperPayrollWorkClock.accrue(owner,u,1000)
+          near(u.elapsedMs,120000,"unlimited 120x")
+
           -- Legacy real-time mode ignores accelerated game clock.
           local r = {}
           owner.settings.workerTimeBasis = "realTime"
+          owner.settings.maxPayrollTimeScale = 10
           clock = {monotonicDay=40, dayTimeMs=12*3600000, dateKey="Y1-M01-D40"}
           scale = 120
           HelperPayrollWorkClock.initialise(owner,r)
