@@ -80,6 +80,14 @@ function HelperPayrollWorkClock.normaliseTimeBasis(value)
     return normaliseBasis(value)
 end
 
+function HelperPayrollWorkClock.getCurrentScales(owner)
+    local effectiveScale = getEffectiveTimeScale()
+    local configuredCap = tonumber(owner ~= nil and owner.settings ~= nil and owner.settings.maxPayrollTimeScale or 10) or 10
+    configuredCap = math.max(0, configuredCap)
+    local billableScale = configuredCap > 0 and math.min(effectiveScale, configuredCap) or effectiveScale
+    return effectiveScale, billableScale, configuredCap
+end
+
 function HelperPayrollWorkClock.initialise(owner, tracked)
     if tracked == nil then return end
 
@@ -127,9 +135,7 @@ function HelperPayrollWorkClock.accrue(owner, tracked, dt)
 
     local previous = tracked.workClockAnchor
     tracked.workClockAnchor = current
-    local effectiveScale = getEffectiveTimeScale()
-    local configuredCap = tonumber(owner ~= nil and owner.settings ~= nil and owner.settings.maxPayrollTimeScale or 10) or 10
-    local billableScale = configuredCap > 0 and math.min(effectiveScale, configuredCap) or effectiveScale
+    local effectiveScale, billableScale, configuredCap = HelperPayrollWorkClock.getCurrentScales(owner)
 
     tracked.lastEffectiveTimeScale = effectiveScale
     tracked.lastBillableTimeScale = billableScale
