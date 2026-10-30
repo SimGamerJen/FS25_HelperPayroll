@@ -1,0 +1,240 @@
+name: Publish HelperPayroll 0.4.4.0 Alpha 1
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: contains(github.event.head_commit.message, '[release 0.4.4.0-alpha1]')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out merged main commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Install Lua and ZIP tools
+        run: sudo apt-get update && sudo apt-get install -y lua5.4 zip unzip
+
+      - name: Validate release metadata and XML
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          for path in (
+              'modDesc.xml',
+              'config/defaultPayrollConfig.xml',
+              'gui/HelperPayrollMenu.xml',
+              'gui/guiProfiles.xml',
+          ):
+              ET.parse(path)
+
+          mod_desc = Path('modDesc.xml').read_text(encoding='utf-8')
+          main = Path('scripts/HelperPayroll.lua').read_text(encoding='utf-8')
+          clock = Path('scripts/HelperPayrollWorkClock.lua').read_text(encoding='utf-8')
+          snapshot = Path('scripts/HelperPayrollSnapshot.lua').read_text(encoding='utf-8')
+          api = Path('scripts/HelperPayrollPublicAPI.lua').read_text(encoding='utf-8')
+          config = Path('config/defaultPayrollConfig.xml').read_text(encoding='utf-8')
+          readme = Path('README.md').read_text(encoding='utf-8')
+          notes = Path('docs/releases/0.4.4.0-alpha1.md').read_text(encoding='utf-8')
+
+          checks = {
+              'mod version': '<version>0.4.4.0</version>' in mod_desc,
+              'runtime version': 'HelperPayroll.VERSION = "0.4.4.0"' in main,
+              'release channel': 'HelperPayroll.RELEASE_CHANNEL = "alpha1"' in main,
+              'README version': '**Current version:** `0.4.4.0` Alpha 1' in readme,
+              'release notes': '# HelperPayroll 0.4.4.0 Alpha 1' in notes,
+              'default game clock': '<workerTimeBasis>gameClock</workerTimeBasis>' in config,
+              'default 10x cap': '<maxPayrollTimeScale>10</maxPayrollTimeScale>' in config,
+              'work clock loaded': 'scripts/HelperPayrollWorkClock.lua' in mod_desc,
+              'clock scale separation': 'getCurrentScales' in clock and 'billableScale' in clock,
+              'snapshot v4': 'SCHEMA_VERSION = 4' in snapshot,
+              'snapshot billable elapsed': 'billableGameElapsedHours' in snapshot,
+              'snapshot active segments': 'workSegments = workSegments' in snapshot,
+              'API v5 retained': 'API_VERSION = 5' in api,
+          }
+          failed = [name for name, ok in checks.items() if not ok]
+          if failed:
+              raise SystemExit('Release validation failed: ' + ', '.join(failed))
+          PY
+
+      - name: Validate Lua syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          find scripts -name '*.lua' -print0 | while IFS= read -r -d '' file; do
+            luac -p "$file"
+          done
+
+      - name: Validate game-clock accounting
+        shell: bash
+        run: |
+          set -euo pipefail
+          lua <<'LUA'
+          dofile("scripts/HelperPayrollWorkClock.lua")
+
+          local scale = 1
+          local clock = {monotonicDay=1, dayTimeMs=8*3600000, dateKey="Y1-M01-D01"}
+          g_currentMission = {
+              timeScale = 1,
+              getEffectiveTimeScale = function() return scale end
+          }
+          local owner = {
+              settings = {workerTimeBasis="gameClock", maxPayrollTimeScale=10},
+              getGameClockSnapshot = function() return {
+                  monotonicDay=clock.monotonicDay,
+                  dayTimeMs=clock.dayTimeMs,
+                  dateKey=clock.dateKey
+              } end
+          }
+
+          local function near(a,b,label)
+              if math.abs((a or 0)-(b or 0)) > 0.001 then
+                  error(string.format("%s: expected %.3f got %.3f", label, b, a or -1))
+              end
+          end
+
+          local function oneSecond(actualScale, cap, billableScale)
+              owner.settings.workerTimeBasis = "gameClock"
+              owner.settings.maxPayrollTimeScale = cap
+              scale = actualScale
+              clock = {monotonicDay=10, dayTimeMs=8*3600000, dateKey="Y1-M01-D10"}
+              local tracked = {}
+              HelperPayrollWorkClock.initialise(owner, tracked)
+              clock.dayTimeMs = clock.dayTimeMs + actualScale * 1000
+              local delta, reason = HelperPayrollWorkClock.accrue(owner, tracked, 1000)
+              near(delta, billableScale * 1000, "billable delta")
+              near(tracked.gameElapsedMs, actualScale * 1000, "validated game delta")
+              near(tracked.billableGameElapsedMs, billableScale * 1000, "billable game delta")
+              if reason ~= "gameClock" then error("unexpected reason " .. tostring(reason)) end
+          end
+
+          oneSecond(1,10,1)
+          oneSecond(5,10,5)
+          oneSecond(10,10,10)
+          oneSecond(30,10,10)
+          oneSecond(60,10,10)
+          oneSecond(120,10,10)
+          oneSecond(360,10,10)
+          oneSecond(120,0,120)
+
+          -- Pause.
+          owner.settings.maxPayrollTimeScale = 10
+          scale = 0
+          clock = {monotonicDay=20, dayTimeMs=9*3600000, dateKey="Y1-M01-D20"}
+          local paused = {}
+          HelperPayrollWorkClock.initialise(owner, paused)
+          local delta, reason = HelperPayrollWorkClock.accrue(owner, paused, 1000)
+          near(delta, 0, "paused delta")
+          if reason ~= "paused" then error("pause reason=" .. tostring(reason)) end
+
+          -- Large jump rejection.
+          scale = 1
+          clock = {monotonicDay=30, dayTimeMs=10*3600000, dateKey="Y1-M01-D30"}
+          local jump = {}
+          HelperPayrollWorkClock.initialise(owner, jump)
+          clock.dayTimeMs = clock.dayTimeMs + 8*3600000
+          delta, reason = HelperPayrollWorkClock.accrue(owner, jump, 1000)
+          near(delta, 0, "jump delta")
+          if reason ~= "clock-jump" then error("jump reason=" .. tostring(reason)) end
+
+          -- Batched movement.
+          clock = {monotonicDay=40, dayTimeMs=9*3600000, dateKey="Y1-M02-D01"}
+          local batched = {}
+          HelperPayrollWorkClock.initialise(owner, batched)
+          HelperPayrollWorkClock.accrue(owner, batched, 1000)
+          HelperPayrollWorkClock.accrue(owner, batched, 1000)
+          clock.dayTimeMs = clock.dayTimeMs + 3000
+          HelperPayrollWorkClock.accrue(owner, batched, 1000)
+          near(batched.elapsedMs, 3000, "batched movement")
+
+          -- Midnight segmentation.
+          scale = 10
+          clock = {monotonicDay=50, dayTimeMs=23*3600000+50*60000, dateKey="Y1-M02-D10"}
+          local midnight = {}
+          HelperPayrollWorkClock.initialise(owner, midnight)
+          clock = {monotonicDay=51, dayTimeMs=10*60000, dateKey="Y1-M02-D11"}
+          HelperPayrollWorkClock.accrue(owner, midnight, 120000)
+          local segments = HelperPayrollWorkClock.getSegments(midnight)
+          if #segments ~= 2 then error("expected two midnight segments") end
+          near(segments[1].elapsedMs, 10*60000, "pre-midnight")
+          near(segments[2].elapsedMs, 10*60000, "post-midnight")
+
+          -- Legacy real time.
+          owner.settings.workerTimeBasis = "realTime"
+          scale = 120
+          clock = {monotonicDay=60, dayTimeMs=12*3600000, dateKey="Y1-M02-D20"}
+          local realtime = {}
+          HelperPayrollWorkClock.initialise(owner, realtime)
+          clock.dayTimeMs = clock.dayTimeMs + 120000
+          HelperPayrollWorkClock.accrue(owner, realtime, 1000)
+          near(realtime.elapsedMs, 1000, "legacy real time")
+          LUA
+
+      - name: Build exact release package
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f FS25_HelperPayroll.zip FS25_HelperPayroll.zip.sha256
+          zip -r FS25_HelperPayroll.zip modDesc.xml HelperPayroll_icon.dds config gui scripts -x '*.DS_Store' '*__MACOSX*'
+          unzip -t FS25_HelperPayroll.zip
+          ZIP_SHA256="$(sha256sum FS25_HelperPayroll.zip | awk '{print $1}')"
+          printf '%s  FS25_HelperPayroll.zip\n' "$ZIP_SHA256" | tee FS25_HelperPayroll.zip.sha256
+          echo "zip_sha256=$ZIP_SHA256" >> "$GITHUB_OUTPUT"
+
+      - name: Upload merged-main package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FS25_HelperPayroll-0.4.4.0-alpha1
+          path: |
+            FS25_HelperPayroll.zip
+            FS25_HelperPayroll.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="0.4.4.0-alpha1"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; refusing to replace an existing release."
+            exit 1
+          fi
+          gh release create "$TAG"             FS25_HelperPayroll.zip             FS25_HelperPayroll.zip.sha256             --repo "$GITHUB_REPOSITORY"             --target "$GITHUB_SHA"             --title "HelperPayroll 0.4.4.0 Alpha 1"             --notes-file docs/releases/0.4.4.0-alpha1.md             --prerelease
+
+      - name: Verify published asset and tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LOCAL_SHA: ${{ steps.package.outputs.zip_sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="0.4.4.0-alpha1"
+          RELEASE_JSON="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG")"
+          REMOTE_DIGEST="$(printf '%s' "$RELEASE_JSON" | jq -r '.assets[] | select(.name=="FS25_HelperPayroll.zip") | .digest')"
+          RELEASE_URL="$(printf '%s' "$RELEASE_JSON" | jq -r '.html_url')"
+          TAG_SHA="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object.sha')"
+
+          test "$REMOTE_DIGEST" = "sha256:$LOCAL_SHA"
+          test "$TAG_SHA" = "$GITHUB_SHA"
+
+          {
+            echo "## HelperPayroll 0.4.4.0 Alpha 1"
+            echo "- Commit: `$GITHUB_SHA`"
+            echo "- Tag: `$TAG`"
+            echo "- ZIP SHA-256: `$LOCAL_SHA`"
+            echo "- Release: $RELEASE_URL"
+          } >> "$GITHUB_STEP_SUMMARY"
