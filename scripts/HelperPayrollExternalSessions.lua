@@ -161,8 +161,12 @@ local function makeResult(session, status)
         elapsedHours = session ~= nil and ((tonumber(session.elapsedMs) or 0) / 3600000) or 0,
         realElapsedHours = session ~= nil and ((tonumber(session.realElapsedMs) or 0) / 3600000) or 0,
         gameElapsedHours = session ~= nil and ((tonumber(session.gameElapsedMs) or 0) / 3600000) or 0,
+        validatedGameElapsedHours = session ~= nil and ((tonumber(session.gameElapsedMs) or 0) / 3600000) or 0,
+        billableGameElapsedHours = session ~= nil and ((tonumber(session.billableGameElapsedMs) or tonumber(session.elapsedMs) or 0) / 3600000) or 0,
         timeBasis = session ~= nil and tostring(session.timeBasis or "unknown") or "unknown",
         effectiveTimeScale = session ~= nil and (tonumber(session.lastEffectiveTimeScale) or 0) or 0,
+        billableTimeScale = session ~= nil and (tonumber(session.lastBillableTimeScale) or 0) or 0,
+        maxPayrollTimeScale = session ~= nil and (tonumber(session.maxPayrollTimeScale) or 10) or 10,
         clockDiscontinuities = session ~= nil and (tonumber(session.clockDiscontinuities) or 0) or 0
     }
 end
