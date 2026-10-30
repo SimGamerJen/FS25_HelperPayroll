@@ -10,7 +10,7 @@ function HelperPayrollPublicAPI.build(owner)
         apiVersion = HelperPayrollPublicAPI.API_VERSION,
         snapshotSchemaVersion = HelperPayrollSnapshot ~= nil and HelperPayrollSnapshot.SCHEMA_VERSION or 1,
         modName = "FS25_HelperPayroll",
-        modVersion = tostring(owner.VERSION or "0.4.3.0"),
+        modVersion = tostring(owner.VERSION or "0.4.4.0"),
         readOnly = false,
         capabilities = {
             roleMappings = true,
@@ -21,7 +21,9 @@ function HelperPayrollPublicAPI.build(owner)
             transportReadySnapshot = true,
             rosterAvailability = true,
             enabledWorkerFiltering = true,
-            externalWorkerSessions = HelperPayrollExternalSessions ~= nil
+            externalWorkerSessions = HelperPayrollExternalSessions ~= nil,
+            gameClockPayroll = HelperPayrollWorkClock ~= nil,
+            activeWorkSegments = HelperPayrollSnapshot ~= nil and (HelperPayrollSnapshot.SCHEMA_VERSION or 0) >= 4
         }
     }
 
@@ -30,6 +32,10 @@ function HelperPayrollPublicAPI.build(owner)
         local roster = owner.getManagedHelperRosterSummary ~= nil and owner:getManagedHelperRosterSummary() or {}
         local externalSessions = HelperPayrollExternalSessions ~= nil and HelperPayrollExternalSessions.getActive ~= nil
             and HelperPayrollExternalSessions.getActive(owner) or {}
+        local effectiveScale, billableScale, configuredCap = 0, 0, tonumber(owner.settings.maxPayrollTimeScale) or 10
+        if HelperPayrollWorkClock ~= nil and HelperPayrollWorkClock.getCurrentScales ~= nil then
+            effectiveScale, billableScale, configuredCap = HelperPayrollWorkClock.getCurrentScales(owner)
+        end
         return {
             available = owner.isInitialized == true,
             apiVersion = self.apiVersion,
@@ -40,7 +46,9 @@ function HelperPayrollPublicAPI.build(owner)
             payrollMode = tostring(owner.settings.payrollMode or "roleType"),
             billingMode = tostring(owner.settings.billingMode or "onJobFinish"),
             workerTimeBasis = tostring(owner.settings.workerTimeBasis or "gameClock"),
-            maxPayrollTimeScale = tonumber(owner.settings.maxPayrollTimeScale) or 10,
+            effectiveTimeScale = tonumber(effectiveScale) or 0,
+            billableTimeScale = tonumber(billableScale) or 0,
+            maxPayrollTimeScale = tonumber(configuredCap) or 10,
             managedSlotCount = owner:getManagedHelperSlotCount(),
             enabledSlotCount = tonumber(roster.enabled) or owner:getManagedHelperSlotCount(),
             disabledSlotCount = tonumber(roster.disabled) or 0,
