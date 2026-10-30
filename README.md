@@ -4,7 +4,7 @@
 
 It supports role-based and named-worker compensation, hourly or daily pay, per-role minimum call-outs, per-worker overrides, immediate or scheduled settlement, persistent ledger reporting, and optional integration with HelperProfiles.
 
-> **Current version:** `0.4.2.0` Alpha 2  
+> **Current version:** `0.4.4.0` Alpha 1  
 > **Game:** Farming Simulator 25  
 > **Multiplayer:** Not supported
 
@@ -19,6 +19,10 @@ It supports role-based and named-worker compensation, hourly or daily pay, per-r
 - Configures pay basis, rate, and minimum call-out for each role.
 - Allows each worker to inherit role terms or use a custom override.
 - Supports immediate `onJobFinish` settlement or scheduled `dailyPayroll`.
+- Uses Farming Simulator's in-game clock for worker-hour accounting by default, with legacy `realTime` mode retained.
+- Caps billable game-clock acceleration at **10× by default**, independently from clock validation; set `maxPayrollTimeScale=0` for uncapped billing.
+- Pauses game-clock wage accrual when the game clock is paused and rejects implausible sleep/period/rollback jumps instead of billing them as labour.
+- Splits `dailyPayroll` work across midnight using validated active-work segments.
 - Supports a global call-out fee and optional charge rounding.
 - Stores settings, role policies, worker mappings, and pending payroll per savegame.
 - Captures worker identity, role, and compensation terms when a job starts.
@@ -161,6 +165,33 @@ Completed work is accumulated and settled at the configured in-game payroll hour
 
 `dailyPayroll` controls settlement timing; it does not force every role to use daily compensation.
 
+## Worker Time Basis
+
+HelperPayroll now defaults worker-hour accounting to the **in-game clock**.
+
+- `gameClock` (default): wages accrue from Farming Simulator's in-game time. Deliberate time acceleration therefore increases payroll while workers remain active.
+- `maxPayrollTimeScale` caps the **billable** acceleration. The default is `10`, so 30×, 60× or 360× gameplay is still recognised as valid accelerated time but wages accrue no faster than 10×. Set `0` for unlimited game-clock billing.
+- `realTime`: legacy behaviour; wages accrue from real frame time and ignore game-speed acceleration.
+- Paused game time does not accrue `gameClock` wages.
+- Discontinuous jumps such as sleep, period skips, clock rollbacks, or other time resets re-anchor the worker timer instead of creating windfall charges.
+- Jobs that cross midnight are split across the relevant game days for `dailyPayroll`.
+
+Normal accelerated clock movement is validated against the mission's **actual** effective time scale, while payroll uses the configured billable cap. The cap never weakens clock validation.
+
+With the default `maxPayrollTimeScale=10`:
+
+| FS time scale | Billable payroll scale |
+|---:|---:|
+| 1× | 1× |
+| 5× | 5× |
+| 10× | 10× |
+| 30× | 10× |
+| 60× | 10× |
+| 120× | 10× |
+| 360× | 10× |
+
+Setting `maxPayrollTimeScale=0` removes the billing cap and restores full game-clock payroll at the actual validated Farming Simulator time scale.
+
 ## Management Screen
 
 Open the screen with:
@@ -174,7 +205,7 @@ The screen contains six tabs:
 | Tab | Purpose |
 |---|---|
 | **Overview** | Shows active profile, modes, selected role, integration status, pending payroll, and save path. |
-| **Billing** | Edits payroll mode, billing mode, payroll hour, legacy minimum, global call-out fee, and rounding. |
+| **Billing** | Edits payroll mode, billing mode, worker time basis, maximum billable payroll time scale, payroll hour, legacy minimum, global call-out fee, and rounding. |
 | **Roles** | Edits each role's pay basis, rate, and minimum call-out. |
 | **Workers** | Assigns roles and configures inherited or custom worker compensation for the managed roster. |
 | **Ledger** | Displays persistent payroll totals. |
@@ -194,7 +225,9 @@ Resetting a save does not overwrite the global `defaultPayrollConfig.xml`.
 
 HelperProfiles is optional and is not a hard dependency.
 
-HelperPayroll `0.4.2.0` supports the twenty-slot HelperProfiles API and publishes its own role-assignment API globally and on the active mission.
+HelperPayroll owns **roles, rates, wage accounting, settlement and payroll history**. HelperProfiles remains the roster/identity layer and only consumes HelperPayroll's public payroll snapshot/API to display read-only role and live **COST** information. Neither mod requires the other to operate.
+
+HelperPayroll `0.4.4.0` supports the twenty-slot HelperProfiles API and publishes its role-assignment and payroll-snapshot API globally and on the active mission.
 
 With HelperProfiles `2.1.0.0` or a compatible later build:
 
@@ -216,6 +249,26 @@ hpayProfiles slots
 ```
 
 HelperPayroll remains usable in standalone `roleType` mode when HelperProfiles is absent.
+
+## Public API and Snapshot
+
+HelperPayroll keeps **public API version 5** for compatibility. No existing public API methods are removed by 0.4.4.0 Alpha 1.
+
+The payroll snapshot advances to **schema v4** because active work now exposes game-clock accounting and per-day work segments. Existing fields remain available; `elapsedHours` continues to represent the billable duration used for wage estimates.
+
+Active job/session snapshot data can include:
+
+- `timeBasis` — `gameClock` or legacy `realTime`;
+- `realElapsedHours` — real frame time observed while the worker is active;
+- `gameElapsedHours` / `validatedGameElapsedHours` — accepted Farming Simulator clock movement;
+- `billableGameElapsedHours` — validated game-clock time after the payroll acceleration cap;
+- `effectiveTimeScale` — the actual Farming Simulator effective time scale used for clock validation;
+- `billableTimeScale` — the scale currently used for payroll accrual;
+- `maxPayrollTimeScale` — configured billable cap, where `0` means unlimited;
+- `clockDiscontinuities` — rejected/re-anchored clock jumps;
+- `workSegments` — active billable work split by game date for midnight-aware daily payroll.
+
+`getStatus()` also exposes the current worker time basis, effective scale, billable scale and configured cap. Consumers should prefer capability/schema checks over assuming every field is present in older builds.
 
 ### Hired Helper Tool note
 
@@ -245,6 +298,7 @@ The file contains:
 
 - Active payroll profile.
 - Payroll and billing modes.
+- Worker time basis (`gameClock` or legacy `realTime`) and maximum billable payroll time scale.
 - Role compensation policies.
 - Worker-role mappings.
 - Worker compensation overrides.
@@ -336,6 +390,8 @@ Role IDs must be unique and non-empty. Save-specific role definitions are preser
         <selectedRole>standard</selectedRole>
         <fallbackRole>standard</fallbackRole>
         <billingMode>dailyPayroll</billingMode>
+        <workerTimeBasis>gameClock</workerTimeBasis>
+        <maxPayrollTimeScale>10</maxPayrollTimeScale>
         <payrollHour>18</payrollHour>
         <workerCalloutFee>0.00</workerCalloutFee>
         <roundWorkerCharges>true</roundWorkerCharges>
@@ -489,6 +545,27 @@ Role assignments are edited in the HelperPayroll **Workers** tab. The HelperProf
 Include the HelperPayroll version, HelperProfiles version when installed, relevant `log.txt` excerpt, savegame number, active modes, and clear reproduction steps.
 
 ## Version History
+
+### Version 0.4.4.0 Alpha 1
+
+- Changed the default worker-time basis from real frame time to validated Farming Simulator **game-clock** time.
+- Retained legacy `realTime` accounting as a selectable Billing option.
+- Added independent validation and billing scales: the actual effective FS time scale validates clock movement, while `maxPayrollTimeScale` caps wage acceleration.
+- Defaulted `maxPayrollTimeScale` to **10×**; `0` means unlimited/full game-clock payroll.
+- Added pause-safe accrual, coarse/batched clock handling, discontinuity rejection/re-anchoring and clock-rollback protection.
+- Added midnight work segmentation so `dailyPayroll` can attribute work to the correct game day.
+- Persisted worker time basis and payroll time-scale cap per save and exposed both in the Billing UI.
+- Advanced payroll snapshot schema to **v4** with validated/billable elapsed time, scale diagnostics and active work segments.
+- Kept public API version **5** and preserved existing API methods while adding time-accounting status fields.
+- Retained HelperProfiles live role/COST integration and external-worker session accounting.
+
+### Version 0.4.3.0 Alpha 2
+
+- Added HelperProfiles roster-aware payroll management: OFF-roster workers are hidden operationally without losing roles, overrides or history.
+- Added a generic external-worker session API for controllers outside GIANTS `activeJobs`, including AutoDrive continuity integration.
+- Added the live payroll Dashboard and serializable payroll snapshots.
+- Added WorkerCosts conflict protection and farm/job state boundaries designed for later multiplayer work while multiplayer remains disabled.
+- Extended public API/roster reporting and retained stable A–T identities.
 
 ### Version 0.4.2.0 Alpha 2
 

@@ -14,8 +14,8 @@ local hpGetTimeMs
 
 HelperPayroll = {}
 HelperPayroll.MOD_NAME = g_currentModName or "FS25_HelperPayroll"
-HelperPayroll.VERSION = "0.4.3.0"
-HelperPayroll.RELEASE_CHANNEL = "alpha2"
+HelperPayroll.VERSION = "0.4.4.0"
+HelperPayroll.RELEASE_CHANNEL = "alpha1"
 HelperPayroll.TARGET_HELPER_SLOTS = 20
 HelperPayroll.MOD_DIRECTORY = g_currentModDirectory or ""
 HelperPayroll.BUNDLED_CONFIG_FILE = HelperPayroll.MOD_DIRECTORY .. "config/defaultPayrollConfig.xml"
@@ -33,6 +33,8 @@ HelperPayroll.settings = {
     defaultHelperSlot = "",
     chargeCustomWorkerCosts = true,
     billingMode = "onJobFinish",
+    workerTimeBasis = "gameClock",
+    maxPayrollTimeScale = 10,
     payrollHour = 18,
     minimumWorkerCharge = 0,
     workerCalloutFee = 0,
@@ -279,6 +281,8 @@ local HPAY_DEFAULT_POLICY_XML = [=[
 
         <chargeCustomWorkerCosts>true</chargeCustomWorkerCosts>
         <billingMode>onJobFinish</billingMode>
+        <workerTimeBasis>gameClock</workerTimeBasis>
+        <maxPayrollTimeScale>10</maxPayrollTimeScale>
         <payrollHour>18</payrollHour>
         <minimumWorkerCharge>5.00</minimumWorkerCharge>
         <workerCalloutFee>0.00</workerCalloutFee>
@@ -503,6 +507,8 @@ function HelperPayroll:buildPolicyConfigXmlFromRuntime()
     add(string.format('        <defaultHelperSlot>%s</defaultHelperSlot>', hpayXmlEscape(settings.defaultHelperSlot or '')))
     add(string.format('        <chargeCustomWorkerCosts>%s</chargeCustomWorkerCosts>', tostring(settings.chargeCustomWorkerCosts == true)))
     add(string.format('        <billingMode>%s</billingMode>', hpayXmlEscape(settings.billingMode or 'onJobFinish')))
+    add(string.format('        <workerTimeBasis>%s</workerTimeBasis>', hpayXmlEscape(settings.workerTimeBasis or 'gameClock')))
+    add(string.format('        <maxPayrollTimeScale>%s</maxPayrollTimeScale>', tostring(tonumber(settings.maxPayrollTimeScale) or 10)))
     add(string.format('        <payrollHour>%s</payrollHour>', tostring(math.floor(tonumber(settings.payrollHour) or 18))))
     add(string.format('        <minimumWorkerCharge>%.2f</minimumWorkerCharge>', tonumber(settings.minimumWorkerCharge) or 0))
     add(string.format('        <workerCalloutFee>%.2f</workerCalloutFee>', tonumber(settings.workerCalloutFee) or 0))
@@ -585,6 +591,10 @@ function HelperPayroll:applyManagementDraft(draftSettings, draftRolePolicies, dr
     draftMappings = draftMappings or {}
     draftWorkerOverrides = draftWorkerOverrides or {}
     self.settings.billingMode = tostring(draftSettings.billingMode or self.settings.billingMode or 'onJobFinish')
+    self.settings.workerTimeBasis = HelperPayrollWorkClock ~= nil
+        and HelperPayrollWorkClock.normaliseTimeBasis(draftSettings.workerTimeBasis or self.settings.workerTimeBasis)
+        or tostring(draftSettings.workerTimeBasis or self.settings.workerTimeBasis or 'gameClock')
+    self.settings.maxPayrollTimeScale = math.max(0, tonumber(draftSettings.maxPayrollTimeScale or self.settings.maxPayrollTimeScale) or 10)
     self.settings.payrollHour = math.floor(tonumber(draftSettings.payrollHour or self.settings.payrollHour) or 18)
     self.settings.minimumWorkerCharge = tonumber(draftSettings.minimumWorkerCharge or self.settings.minimumWorkerCharge) or 0
     self.settings.workerCalloutFee = tonumber(draftSettings.workerCalloutFee or self.settings.workerCalloutFee) or 0
@@ -692,6 +702,11 @@ function HelperPayroll:loadConfig()
     self.settings.defaultHelperSlot = getXmlStringOrDefault(xmlFile, "helperPayroll.settings.defaultHelperSlot", self.settings.defaultHelperSlot)
     self.settings.chargeCustomWorkerCosts = getXmlBoolOrDefault(xmlFile, "helperPayroll.settings.chargeCustomWorkerCosts", self.settings.chargeCustomWorkerCosts)
     self.settings.billingMode = getXmlStringOrDefault(xmlFile, "helperPayroll.settings.billingMode", self.settings.billingMode)
+    self.settings.workerTimeBasis = getXmlStringOrDefault(xmlFile, "helperPayroll.settings.workerTimeBasis", self.settings.workerTimeBasis)
+    if HelperPayrollWorkClock ~= nil and HelperPayrollWorkClock.normaliseTimeBasis ~= nil then
+        self.settings.workerTimeBasis = HelperPayrollWorkClock.normaliseTimeBasis(self.settings.workerTimeBasis)
+    end
+    self.settings.maxPayrollTimeScale = math.max(0, getXmlFloatOrDefault(xmlFile, "helperPayroll.settings.maxPayrollTimeScale", self.settings.maxPayrollTimeScale or 10))
     self.settings.payrollHour = getXmlFloatOrDefault(xmlFile, "helperPayroll.settings.payrollHour", self.settings.payrollHour)
     self.settings.minimumWorkerCharge = getXmlFloatOrDefault(xmlFile, "helperPayroll.settings.minimumWorkerCharge", self.settings.minimumWorkerCharge)
     self.settings.workerCalloutFee = getXmlFloatOrDefault(xmlFile, "helperPayroll.settings.workerCalloutFee", self.settings.workerCalloutFee)
@@ -708,7 +723,7 @@ function HelperPayroll:loadConfig()
 
     delete(xmlFile)
     rcLog("Loaded config. source=%s file=%s Active payroll profile: %s", tostring(self.policyConfig ~= nil and self.policyConfig.source or "unknown"), tostring(self.CONFIG_FILE), tostring(self.settings.activePayrollProfile))
-    rcLog("Worker billing settings: enabled=%s payrollMode=%s billingMode=%s payrollHour=%s selectedRole=%s fallbackRole=%s defaultHelperSlot=%s minimum=%.2f callout=%.2f round=%s logLevel=%s helperProfilesDiagnostics=%s", tostring(self.settings.chargeCustomWorkerCosts), tostring(self.settings.payrollMode), tostring(self.settings.billingMode), tostring(self.settings.payrollHour), tostring(self.settings.selectedRole), tostring(self.settings.fallbackRole), tostring(self.settings.defaultHelperSlot ~= "" and self.settings.defaultHelperSlot or "none"), tonumber(self.settings.minimumWorkerCharge) or 0, tonumber(self.settings.workerCalloutFee) or 0, tostring(self.settings.roundWorkerCharges), tostring(self.settings.logLevel), tostring(self.settings.helperProfilesDiagnostics))
+    rcLog("Worker billing settings: enabled=%s payrollMode=%s billingMode=%s timeBasis=%s maxPayrollTimeScale=%s payrollHour=%s selectedRole=%s fallbackRole=%s defaultHelperSlot=%s minimum=%.2f callout=%.2f round=%s logLevel=%s helperProfilesDiagnostics=%s", tostring(self.settings.chargeCustomWorkerCosts), tostring(self.settings.payrollMode), tostring(self.settings.billingMode), tostring(self.settings.workerTimeBasis), tostring(self.settings.maxPayrollTimeScale), tostring(self.settings.payrollHour), tostring(self.settings.selectedRole), tostring(self.settings.fallbackRole), tostring(self.settings.defaultHelperSlot ~= "" and self.settings.defaultHelperSlot or "none"), tonumber(self.settings.minimumWorkerCharge) or 0, tonumber(self.settings.workerCalloutFee) or 0, tostring(self.settings.roundWorkerCharges), tostring(self.settings.logLevel), tostring(self.settings.helperProfilesDiagnostics))
     self:logHelperSlotConfig()
 end
 
@@ -3368,6 +3383,50 @@ function HelperPayroll:processDailyPayroll(dt, force, triggerReason)
 end
 
 
+function HelperPayroll:buildDailyPayrollEntries(tracked, baseEntry)
+    local segments = HelperPayrollWorkClock ~= nil and HelperPayrollWorkClock.getSegments ~= nil
+        and HelperPayrollWorkClock.getSegments(tracked) or {}
+
+    if #segments == 0 then
+        return {baseEntry}
+    end
+
+    local rows = {}
+    local payBasis = self:normalisePayBasis(baseEntry.payBasis)
+    local payRate = tonumber(baseEntry.payRate or baseEntry.hourlyRate) or 0
+    local calloutFee = payBasis == "daily" and 0 or (tonumber(self.settings.workerCalloutFee) or 0)
+    local minimumCharge = payBasis == "daily" and 0
+        or (tonumber(baseEntry.minimumCallout) or tonumber(self.settings.minimumWorkerCharge) or 0)
+
+    for _, segment in ipairs(segments) do
+        local row = {}
+        for key, value in pairs(baseEntry) do row[key] = value end
+
+        local elapsedHours = (tonumber(segment.elapsedMs) or 0) / 3600000
+        local labour = payBasis == "daily" and payRate or elapsedHours * payRate
+        local calculated = labour + calloutFee
+        local minimumApplied = false
+        if calculated > 0 and minimumCharge > 0 and calculated < minimumCharge then
+            calculated = minimumCharge
+            minimumApplied = true
+        end
+
+        row.gameDate = tostring(segment.gameDate or baseEntry.gameDate or self:getGameDateKey())
+        row.workMonotonicDay = tonumber(segment.monotonicDay) or baseEntry.workMonotonicDay
+        row.workDayTime = nil
+        row.elapsedHours = elapsedHours
+        row.labourCharge = self:roundCurrency(labour)
+        row.calloutFee = self:roundCurrency(calloutFee)
+        row.minimumCharge = self:roundCurrency(minimumCharge)
+        row.appliedMinimum = minimumApplied
+        row.calculatedJobCharge = self:roundCurrency(calculated)
+        row.charge = 0
+        table.insert(rows, row)
+    end
+
+    return rows
+end
+
 function HelperPayroll:applyWorkerCharge(tracked)
     if not self:isPayrollRuntimeEnabled() then
         rcWarn("Worker billing skipped because the runtime compatibility safety block is active")
@@ -3434,6 +3493,50 @@ function HelperPayroll:applyWorkerCharge(tracked)
     entry.appliedMinimum = breakdown.appliedMinimum
     self.workerLedger[self.workerLedgerCount] = entry
 
+    if self:isDailyPayrollMode() then
+        local dailyEntries = self:buildDailyPayrollEntries(tracked, entry)
+        local recordedRows = 0
+
+        for _, dailyEntry in ipairs(dailyEntries) do
+            local skipDailyRate = self:hasDailyRateBeenPaid(dailyEntry)
+            if skipDailyRate then
+                dailyEntry.calculatedJobCharge = 0
+                dailyEntry.labourCharge = 0
+                self:recordPersistentLedgerEntry(
+                    self:buildPersistentLedgerEntryFromWorkerEntry(dailyEntry, "daily-rate-already-paid"),
+                    "job-daily-rate-already-paid"
+                )
+            else
+                local daily = self:updateDailyLedger(dailyEntry)
+                recordedRows = recordedRows + 1
+                rcLog(
+                    "Worker billing deferred to daily payroll: seq=%s type=%s helperSlot=%s helper=%s elapsedHours=%.3f rate=%.2f labour=%.2f dailyJobs=%s gameDate=%s payrollHour=%s timeBasis=%s",
+                    tostring(dailyEntry.sequence),
+                    tostring(dailyEntry.jobType),
+                    tostring(dailyEntry.helperSlot),
+                    tostring(dailyEntry.helperName),
+                    tonumber(dailyEntry.elapsedHours) or 0,
+                    tonumber(dailyEntry.hourlyRate) or 0,
+                    tonumber(dailyEntry.labourCharge) or 0,
+                    tostring(daily ~= nil and daily.jobs or "unknown"),
+                    tostring(dailyEntry.gameDate),
+                    tostring(self.settings.payrollHour),
+                    tostring(self.settings.workerTimeBasis or "gameClock")
+                )
+                self:recordPersistentLedgerEntry(
+                    self:buildPersistentLedgerEntryFromWorkerEntry(dailyEntry, "deferred"),
+                    "job-deferred"
+                )
+            end
+        end
+
+        if recordedRows > 0 then
+            self:saveSavegameSettings("daily-payroll-pending")
+            self:processDailyPayroll(0, true, "job-deferred")
+        end
+        return true
+    end
+
     if self:hasDailyRateBeenPaid(entry) then
         entry.calculatedJobCharge = 0
         rcLog("Day-rate worker already paid for workDate=%s helper=%s workerRate=%s; additional job recorded with no extra charge", tostring(entry.gameDate), tostring(entry.helperName), tostring(entry.workerId))
@@ -3451,31 +3554,6 @@ function HelperPayroll:applyWorkerCharge(tracked)
     end
 
     local daily = self:updateDailyLedger(entry)
-
-    if self:isDailyPayrollMode() then
-        rcLog(
-            "Worker billing deferred to daily payroll: seq=%s type=%s payrollMode=%s helperSlot=%s helperSlotUsedForPayroll=%s helper=%s role=%s workerRate=%s profile=%s elapsedHours=%.3f rate=%.2f labour=%.2f dailyJobs=%s gameDate=%s payrollHour=%s",
-            tostring(entry.sequence),
-            tostring(entry.jobType),
-            tostring(entry.payrollMode or self.settings.payrollMode),
-            tostring(entry.helperSlot),
-            tostring(entry.helperSlotUsedForPayroll),
-            tostring(entry.helperName),
-            tostring(entry.helperRole),
-            tostring(entry.workerId),
-            tostring(entry.profileId),
-            tonumber(entry.elapsedHours) or 0,
-            tonumber(entry.hourlyRate) or 0,
-            tonumber(entry.labourCharge) or 0,
-            tostring(daily ~= nil and daily.jobs or "unknown"),
-            tostring(entry.gameDate),
-            tostring(self.settings.payrollHour)
-        )
-        self:recordPersistentLedgerEntry(self:buildPersistentLedgerEntryFromWorkerEntry(entry, "deferred"), "job-deferred")
-        self:saveSavegameSettings("daily-payroll-pending")
-        self:processDailyPayroll(0, true, "job-deferred")
-        return true
-    end
 
     if chargeToApply <= 0 then
         rcLog(
@@ -3743,6 +3821,9 @@ function HelperPayroll:scanActiveAIJobs(dt)
 
             local assignment = self:captureWorkerAssignment(self.trackedAIJobs[jobId])
             self.trackedAIJobs[jobId].assignmentSnapshot = assignment
+            if HelperPayrollWorkClock ~= nil and HelperPayrollWorkClock.initialise ~= nil then
+                HelperPayrollWorkClock.initialise(self, self.trackedAIJobs[jobId])
+            end
             self.trackedAIJobs[jobId].helperSlot = assignment.helperSlot
             self.trackedAIJobs[jobId].helperSlotSource = assignment.helperSlotSource
             self.trackedAIJobs[jobId].helperSlotUsedForPayroll = assignment.helperSlotUsedForPayroll
@@ -3752,18 +3833,26 @@ function HelperPayroll:scanActiveAIJobs(dt)
         end
 
         local tracked = self.trackedAIJobs[jobId]
-        tracked.elapsedMs = (tracked.elapsedMs or 0) + (dt or 0)
+        if HelperPayrollWorkClock ~= nil and HelperPayrollWorkClock.accrue ~= nil then
+            HelperPayrollWorkClock.accrue(self, tracked, dt)
+        else
+            tracked.elapsedMs = (tracked.elapsedMs or 0) + (dt or 0)
+        end
 
         -- Duration tracking and active summary. Billing is applied when the job finishes.
         if tracked.elapsedMs - (tracked.lastSummaryMs or 0) >= 60000 then
             tracked.lastSummaryMs = tracked.elapsedMs
             rcLog(
-                "AI job active summary: seq=%s id=%s type=%s helperSlot=%s elapsedMinutes=%.1f customBilling=%s",
+                "AI job active summary: seq=%s id=%s type=%s helperSlot=%s elapsedMinutes=%.1f timeBasis=%s effectiveScale=%.1f billableScale=%.1f discontinuities=%d customBilling=%s",
                 tostring(tracked.sequence),
                 tostring(jobId),
                 tostring(tracked.name),
                 tostring(tracked.helperSlot or "unassigned"),
                 (tracked.elapsedMs or 0) / 60000,
+                tostring(tracked.timeBasis or self.settings.workerTimeBasis or "gameClock"),
+                tonumber(tracked.lastEffectiveTimeScale) or 0,
+                tonumber(tracked.lastBillableTimeScale) or 0,
+                tonumber(tracked.clockDiscontinuities) or 0,
                 tostring(self.settings.enableCustomWorkerCosts and self.settings.chargeCustomWorkerCosts)
             )
         end
@@ -3954,6 +4043,11 @@ function HelperPayroll:loadSavegameSettings()
     -- Save-specific gameplay policy overrides.  The global defaultPayrollConfig.xml remains
     -- the template/default policy; the management UI writes active gameplay changes here.
     self.settings.billingMode = getXmlStringOrDefault(xmlFile, "helperPayrollSave.policy#billingMode", self.settings.billingMode)
+    self.settings.workerTimeBasis = getXmlStringOrDefault(xmlFile, "helperPayrollSave.policy#workerTimeBasis", self.settings.workerTimeBasis or "gameClock")
+    if HelperPayrollWorkClock ~= nil and HelperPayrollWorkClock.normaliseTimeBasis ~= nil then
+        self.settings.workerTimeBasis = HelperPayrollWorkClock.normaliseTimeBasis(self.settings.workerTimeBasis)
+    end
+    self.settings.maxPayrollTimeScale = math.max(0, getXmlFloatOrDefault(xmlFile, "helperPayrollSave.policy#maxPayrollTimeScale", self.settings.maxPayrollTimeScale or 10))
     self.settings.payrollHour = getXmlFloatOrDefault(xmlFile, "helperPayrollSave.policy#payrollHour", self.settings.payrollHour or 18)
     self.settings.minimumWorkerCharge = getXmlFloatOrDefault(xmlFile, "helperPayrollSave.policy#minimumWorkerCharge", self.settings.minimumWorkerCharge or 0)
     self.settings.workerCalloutFee = getXmlFloatOrDefault(xmlFile, "helperPayrollSave.policy#workerCalloutFee", self.settings.workerCalloutFee or 0)
@@ -4171,6 +4265,8 @@ function HelperPayroll:saveSavegameSettings(reason)
 
     -- Save-specific gameplay policy overrides written by the management UI.
     setXMLString(xmlFile, "helperPayrollSave.policy#billingMode", tostring(self.settings.billingMode or "onJobFinish"))
+    setXMLString(xmlFile, "helperPayrollSave.policy#workerTimeBasis", tostring(self.settings.workerTimeBasis or "gameClock"))
+    setXMLFloat(xmlFile, "helperPayrollSave.policy#maxPayrollTimeScale", tonumber(self.settings.maxPayrollTimeScale) or 10)
     setXMLInt(xmlFile, "helperPayrollSave.policy#payrollHour", math.floor(tonumber(self.settings.payrollHour) or 18))
     setXMLFloat(xmlFile, "helperPayrollSave.policy#minimumWorkerCharge", tonumber(self.settings.minimumWorkerCharge) or 0)
     setXMLFloat(xmlFile, "helperPayrollSave.policy#workerCalloutFee", tonumber(self.settings.workerCalloutFee) or 0)
@@ -5503,8 +5599,8 @@ function HelperPayroll:printSaveSettingsStatus()
         tostring(self.persistence ~= nil and self.persistence.savegameName or "unknown"),
         tostring(self.persistence ~= nil and self.persistence.filePath or "nil"),
         tostring(self.persistence ~= nil and self.persistence.loaded == true))
-    hpayPrintf("Effective active values: payrollMode=%s billingMode=%s profile=%s selectedRole=%s name=%s rate=%.2f fallbackRole=%s minimum=%.2f callout=%.2f payrollHour=%s round=%s helperProfilesMappings=%d",
-        tostring(self.settings.payrollMode), tostring(self.settings.billingMode), tostring(profileId), tostring(roleId), tostring(roleName), tonumber(rate) or 0, tostring(self.settings.fallbackRole), tonumber(self.settings.minimumWorkerCharge) or 0, tonumber(self.settings.workerCalloutFee) or 0, tostring(self.settings.payrollHour), tostring(self.settings.roundWorkerCharges), #(self.helperProfilesMappings or {}))
+    hpayPrintf("Effective active values: payrollMode=%s billingMode=%s timeBasis=%s maxPayrollTimeScale=%s profile=%s selectedRole=%s name=%s rate=%.2f fallbackRole=%s minimum=%.2f callout=%.2f payrollHour=%s round=%s helperProfilesMappings=%d",
+        tostring(self.settings.payrollMode), tostring(self.settings.billingMode), tostring(self.settings.workerTimeBasis), tostring(self.settings.maxPayrollTimeScale or 10), tostring(profileId), tostring(roleId), tostring(roleName), tonumber(rate) or 0, tostring(self.settings.fallbackRole), tonumber(self.settings.minimumWorkerCharge) or 0, tonumber(self.settings.workerCalloutFee) or 0, tostring(self.settings.payrollHour), tostring(self.settings.roundWorkerCharges), #(self.helperProfilesMappings or {}))
 end
 
 function HelperPayroll:hpayConfig(...)
@@ -5619,6 +5715,12 @@ function HelperPayroll:hpayDump(...)
         local payrollHour = tonumber(self.settings.payrollHour) or 18
         hpayPrintf("Payroll clock: date=%s monotonicDay=%s dayTimeMs=%s hour=%s payrollHour=%s pendingRows=%d",
             tostring(clock.dateKey), tostring(clock.monotonicDay), tostring(clock.dayTimeMs), tostring(clock.hour), tostring(payrollHour), self:countPendingDailyPayrollRows())
+        local effectiveScale, billableScale, configuredCap = 0, 0, tonumber(self.settings.maxPayrollTimeScale) or 10
+        if HelperPayrollWorkClock ~= nil and HelperPayrollWorkClock.getCurrentScales ~= nil then
+            effectiveScale, billableScale, configuredCap = HelperPayrollWorkClock.getCurrentScales(self)
+        end
+        hpayPrintf("Worker time accounting: basis=%s effectiveTimeScale=%.1f billableTimeScale=%.1f maxPayrollTimeScale=%s",
+            tostring(self.settings.workerTimeBasis or "gameClock"), tonumber(effectiveScale) or 0, tonumber(billableScale) or 0, tostring(configuredCap))
         for key, daily in pairs(self.workerDailyLedger or {}) do
             if daily ~= nil and daily.payrollApplied ~= true and (tonumber(daily.jobs) or 0) > 0 then
                 local due, reason = self:isDailyPayrollRowDue(daily, clock, payrollHour)
@@ -5631,6 +5733,10 @@ function HelperPayroll:hpayDump(...)
         local roleId, roleName, rate, profileId = self:getSelectedRoleInfo()
         local hpStatus = self:getHelperProfilesStatus()
         local compatibility = self:getCompatibilityStatus()
+        local effectiveScale, billableScale, configuredCap = 0, 0, tonumber(self.settings.maxPayrollTimeScale) or 10
+        if HelperPayrollWorkClock ~= nil and HelperPayrollWorkClock.getCurrentScales ~= nil then
+            effectiveScale, billableScale, configuredCap = HelperPayrollWorkClock.getCurrentScales(self)
+        end
         hpayPrintf("Status: version=%s channel=%s payrollMode=%s billingMode=%s profile=%s selectedRole=%s name=%s rate=%.2f trackedJobs=%d pendingRows=%d helperProfilesLoaded=%s helperProfilesApi=%s helperProfilesApiVersion=%s payrollEnabled=%s compatibilityBlocked=%s conflict=%s authority=singlePlayerMission multiplayerSupported=false snapshotSchema=%s roleListVisible=%s reportOverlayVisible=%s reportPage=%s saveFile=%s globalPolicySource=%s globalPolicyFile=%s",
             tostring(self.VERSION or "0.3.3.0"), tostring(self.RELEASE_CHANNEL or "beta-rc"),
             tostring(self.settings.payrollMode), tostring(self.settings.billingMode), tostring(profileId), tostring(roleId), tostring(roleName), tonumber(rate) or 0,
@@ -5640,6 +5746,8 @@ function HelperPayroll:hpayDump(...)
             tostring(HelperPayrollSnapshot ~= nil and HelperPayrollSnapshot.SCHEMA_VERSION or 1),
             tostring(self.roleListVisible == true), tostring(self.reportOverlayVisible == true), tostring(self.reportOverlayPage or 1),
             tostring(self.persistence ~= nil and self.persistence.filePath or "nil"), tostring(self.policyConfig ~= nil and self.policyConfig.source or "unknown"), tostring(self.CONFIG_FILE))
+        hpayPrintf("Worker time accounting: basis=%s effectiveTimeScale=%.1f billableTimeScale=%.1f maxPayrollTimeScale=%s",
+            tostring(self.settings.workerTimeBasis or "gameClock"), tonumber(effectiveScale) or 0, tonumber(billableScale) or 0, tostring(configuredCap))
         return
     end
 
@@ -5715,6 +5823,12 @@ function HelperPayroll:logRuntimeStartupStatus()
         tostring(compatibility.blocked == true),
         tostring(compatibility.primaryConflictName or "none"),
         tostring(HelperPayrollSnapshot ~= nil and HelperPayrollSnapshot.SCHEMA_VERSION or 1))
+    local effectiveScale, billableScale, configuredCap = 0, 0, tonumber(self.settings.maxPayrollTimeScale) or 10
+    if HelperPayrollWorkClock ~= nil and HelperPayrollWorkClock.getCurrentScales ~= nil then
+        effectiveScale, billableScale, configuredCap = HelperPayrollWorkClock.getCurrentScales(self)
+    end
+    rcLog("Worker time accounting: basis=%s effectiveTimeScale=%.1f billableTimeScale=%.1f maxPayrollTimeScale=%s",
+        tostring(self.settings.workerTimeBasis or "gameClock"), tonumber(effectiveScale) or 0, tonumber(billableScale) or 0, tostring(configuredCap))
 end
 
 function HelperPayroll:processStartupStatus(dt)

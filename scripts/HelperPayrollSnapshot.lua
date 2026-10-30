@@ -5,7 +5,7 @@
 -- server-to-client transport without changing consumers.
 
 HelperPayrollSnapshot = HelperPayrollSnapshot or {}
-HelperPayrollSnapshot.SCHEMA_VERSION = 3
+HelperPayrollSnapshot.SCHEMA_VERSION = 4
 
 local function round(value, places)
     local n = tonumber(value) or 0
@@ -68,6 +68,33 @@ local function buildActiveJobs(owner)
     local function appendTracked(tracked, source)
         if tracked == nil then return end
         local estimate, labour, elapsedHours, assignment, payBasis, payRate = estimateTrackedCharge(owner, tracked)
+        local workSegments = {}
+        if HelperPayrollWorkClock ~= nil and HelperPayrollWorkClock.getSegments ~= nil then
+            for _, segment in ipairs(HelperPayrollWorkClock.getSegments(tracked)) do
+                local segmentHours = (tonumber(segment.elapsedMs) or 0) / 3600000
+                local segmentLabour = payBasis == "daily" and payRate or segmentHours * payRate
+                local segmentCallout = payBasis == "daily" and 0 or tonumber(owner.settings ~= nil and owner.settings.workerCalloutFee or 0) or 0
+                local segmentMinimum = payBasis == "daily" and 0 or tonumber(assignment.minimumCallout or (owner.settings ~= nil and owner.settings.minimumWorkerCharge)) or 0
+                local segmentCharge = segmentLabour + segmentCallout
+                if segmentCharge > 0 and segmentMinimum > 0 and segmentCharge < segmentMinimum then
+                    segmentCharge = segmentMinimum
+                end
+                table.insert(workSegments, {
+                    gameDate = tostring(segment.gameDate or assignment.gameDate or "unknown"),
+                    monotonicDay = tonumber(segment.monotonicDay),
+                    elapsedHours = round(segmentHours, 3),
+                    billableElapsedHours = round(segmentHours, 3),
+                    labourEstimate = round(segmentLabour, 2),
+                    chargeEstimate = round(segmentCharge, 2)
+                })
+            end
+        end
+
+        local currentGameDate = assignment.gameDate
+        if #workSegments > 0 then
+            currentGameDate = workSegments[#workSegments].gameDate
+        end
+
         table.insert(jobs, {
             sequence = tonumber(tracked.sequence) or 0,
             source = tostring(source or (tracked.external == true and "external" or "giants-ai")),
@@ -82,11 +109,21 @@ local function buildActiveJobs(owner)
             payBasis = payBasis,
             payRate = payRate,
             elapsedHours = elapsedHours,
+            realElapsedHours = (tonumber(tracked.realElapsedMs) or 0) / 3600000,
+            gameElapsedHours = (tonumber(tracked.gameElapsedMs) or 0) / 3600000,
+            validatedGameElapsedHours = (tonumber(tracked.gameElapsedMs) or 0) / 3600000,
+            billableGameElapsedHours = (tonumber(tracked.billableGameElapsedMs) or tonumber(tracked.elapsedMs) or 0) / 3600000,
+            timeBasis = tostring(tracked.timeBasis or (owner.settings ~= nil and owner.settings.workerTimeBasis) or "gameClock"),
+            effectiveTimeScale = tonumber(tracked.lastEffectiveTimeScale) or 0,
+            billableTimeScale = tonumber(tracked.lastBillableTimeScale) or 0,
+            maxPayrollTimeScale = tonumber(tracked.maxPayrollTimeScale) or tonumber(owner.settings ~= nil and owner.settings.maxPayrollTimeScale) or 10,
+            clockDiscontinuities = tonumber(tracked.clockDiscontinuities) or 0,
             labourEstimate = labour,
             chargeEstimate = estimate,
             farmId = tonumber(assignment.farmId) or assignment.farmId,
             farmIdSource = tostring(assignment.farmIdSource or "unknown"),
-            gameDate = assignment.gameDate,
+            gameDate = currentGameDate,
+            workSegments = workSegments,
             snapshotSource = tostring(assignment.snapshotSource or "runtime"),
             vehicleName = tracked.metadata ~= nil and tracked.metadata.vehicleName or nil
         })
@@ -210,6 +247,10 @@ function HelperPayrollSnapshot.build(owner, options)
     }
     local activeExternalSessions = HelperPayrollExternalSessions ~= nil and HelperPayrollExternalSessions.getActive ~= nil
         and HelperPayrollExternalSessions.getActive(owner) or {}
+    local effectiveScale, billableScale, configuredCap = 0, 0, tonumber(owner.settings ~= nil and owner.settings.maxPayrollTimeScale or 10) or 10
+    if HelperPayrollWorkClock ~= nil and HelperPayrollWorkClock.getCurrentScales ~= nil then
+        effectiveScale, billableScale, configuredCap = HelperPayrollWorkClock.getCurrentScales(owner)
+    end
 
     local snapshot = {
         schemaVersion = HelperPayrollSnapshot.SCHEMA_VERSION,
@@ -227,7 +268,11 @@ function HelperPayrollSnapshot.build(owner, options)
             authority = "singlePlayerMission",
             multiplayerSupported = false,
             transportReadySchema = true,
-            externalWorkerSessionsSupported = HelperPayrollExternalSessions ~= nil
+            externalWorkerSessionsSupported = HelperPayrollExternalSessions ~= nil,
+            workerTimeBasis = tostring(owner.settings ~= nil and owner.settings.workerTimeBasis or "gameClock"),
+            effectiveTimeScale = tonumber(effectiveScale) or 0,
+            billableTimeScale = tonumber(billableScale) or 0,
+            maxPayrollTimeScale = tonumber(configuredCap) or 10
         },
         compatibility = compatibility,
         roster = {
@@ -241,6 +286,8 @@ function HelperPayrollSnapshot.build(owner, options)
             activePayrollProfile = activeProfileId,
             payrollMode = tostring(owner.settings ~= nil and owner.settings.payrollMode or "roleType"),
             billingMode = tostring(owner.settings ~= nil and owner.settings.billingMode or "onJobFinish"),
+            workerTimeBasis = tostring(owner.settings ~= nil and owner.settings.workerTimeBasis or "gameClock"),
+            maxPayrollTimeScale = tonumber(owner.settings ~= nil and owner.settings.maxPayrollTimeScale or 10) or 10,
             payrollHour = tonumber(owner.settings ~= nil and owner.settings.payrollHour or 18) or 18,
             selectedRole = selectedRoleId,
             selectedRoleName = tostring(selectedRoleWorker ~= nil and selectedRoleWorker.name or selectedRoleId),

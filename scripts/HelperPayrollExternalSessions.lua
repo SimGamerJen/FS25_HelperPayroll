@@ -158,7 +158,16 @@ local function makeResult(session, status)
         roleId = assignment.workerId,
         payBasis = assignment.payBasis,
         payRate = assignment.payRate,
-        elapsedHours = session ~= nil and ((tonumber(session.elapsedMs) or 0) / 3600000) or 0
+        elapsedHours = session ~= nil and ((tonumber(session.elapsedMs) or 0) / 3600000) or 0,
+        realElapsedHours = session ~= nil and ((tonumber(session.realElapsedMs) or 0) / 3600000) or 0,
+        gameElapsedHours = session ~= nil and ((tonumber(session.gameElapsedMs) or 0) / 3600000) or 0,
+        validatedGameElapsedHours = session ~= nil and ((tonumber(session.gameElapsedMs) or 0) / 3600000) or 0,
+        billableGameElapsedHours = session ~= nil and ((tonumber(session.billableGameElapsedMs) or tonumber(session.elapsedMs) or 0) / 3600000) or 0,
+        timeBasis = session ~= nil and tostring(session.timeBasis or "unknown") or "unknown",
+        effectiveTimeScale = session ~= nil and (tonumber(session.lastEffectiveTimeScale) or 0) or 0,
+        billableTimeScale = session ~= nil and (tonumber(session.lastBillableTimeScale) or 0) or 0,
+        maxPayrollTimeScale = session ~= nil and (tonumber(session.maxPayrollTimeScale) or 10) or 10,
+        clockDiscontinuities = session ~= nil and (tonumber(session.clockDiscontinuities) or 0) or 0
     }
 end
 
@@ -201,6 +210,9 @@ function HelperPayrollExternalSessions.begin(owner, request)
             label = request.label
         }
     }
+    if HelperPayrollWorkClock ~= nil and HelperPayrollWorkClock.initialise ~= nil then
+        HelperPayrollWorkClock.initialise(owner, session)
+    end
     HelperPayrollExternalSessions.sessions[sessionId] = session
 
     log(
@@ -296,17 +308,25 @@ function HelperPayrollExternalSessions:update(dt)
     if delta <= 0 then return end
 
     for _, session in pairs(self.sessions or {}) do
-        session.elapsedMs = (tonumber(session.elapsedMs) or 0) + delta
+        if HelperPayrollWorkClock ~= nil and HelperPayrollWorkClock.accrue ~= nil and HelperPayroll ~= nil then
+            HelperPayrollWorkClock.accrue(HelperPayroll, session, delta)
+        else
+            session.elapsedMs = (tonumber(session.elapsedMs) or 0) + delta
+        end
         if session.elapsedMs - (tonumber(session.lastSummaryMs) or 0) >= 60000 then
             session.lastSummaryMs = session.elapsedMs
             local assignment = session.assignmentSnapshot or {}
             log(
-                "Active: id=%s controller=%s helperSlot=%s helper=%s elapsedMinutes=%.1f",
+                "Active: id=%s controller=%s helperSlot=%s helper=%s elapsedMinutes=%.1f timeBasis=%s effectiveScale=%.1f billableScale=%.1f discontinuities=%d",
                 tostring(session.sessionId),
                 tostring(session.controller),
                 tostring(assignment.helperSlot or "unassigned"),
                 tostring(assignment.helperName or "Worker"),
-                session.elapsedMs / 60000
+                session.elapsedMs / 60000,
+                tostring(session.timeBasis or (HelperPayroll ~= nil and HelperPayroll.settings ~= nil and HelperPayroll.settings.workerTimeBasis) or "gameClock"),
+                tonumber(session.lastEffectiveTimeScale) or 0,
+                tonumber(session.lastBillableTimeScale) or 0,
+                tonumber(session.clockDiscontinuities) or 0
             )
         end
     end

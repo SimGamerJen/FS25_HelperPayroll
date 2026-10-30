@@ -1,0 +1,259 @@
+name: Validate game-clock payroll
+
+on:
+  push:
+    branches:
+      - feature/game-clock-payroll
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install Lua
+        run: sudo apt-get update && sudo apt-get install -y lua5.4
+
+      - name: Validate XML, release metadata and policy wiring
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          for path in (
+              'modDesc.xml',
+              'config/defaultPayrollConfig.xml',
+              'gui/HelperPayrollMenu.xml',
+              'gui/guiProfiles.xml',
+          ):
+              ET.parse(path)
+
+          mod_desc = Path('modDesc.xml').read_text(encoding='utf-8')
+          main = Path('scripts/HelperPayroll.lua').read_text(encoding='utf-8')
+          clock = Path('scripts/HelperPayrollWorkClock.lua').read_text(encoding='utf-8')
+          menu = Path('scripts/gui/HelperPayrollMenu.lua').read_text(encoding='utf-8')
+          snapshot = Path('scripts/HelperPayrollSnapshot.lua').read_text(encoding='utf-8')
+          api = Path('scripts/HelperPayrollPublicAPI.lua').read_text(encoding='utf-8')
+          external = Path('scripts/HelperPayrollExternalSessions.lua').read_text(encoding='utf-8')
+          config = Path('config/defaultPayrollConfig.xml').read_text(encoding='utf-8')
+          readme = Path('README.md').read_text(encoding='utf-8')
+          notes = Path('docs/releases/0.4.4.0-alpha1.md').read_text(encoding='utf-8')
+
+          checks = {
+              'mod version': '<version>0.4.4.0</version>' in mod_desc,
+              'runtime version': 'HelperPayroll.VERSION = "0.4.4.0"' in main,
+              'release channel': 'HelperPayroll.RELEASE_CHANNEL = "alpha1"' in main,
+              'README current version': '**Current version:** `0.4.4.0` Alpha 1' in readme,
+              'release notes alpha warning': 'alpha pre-release' in notes.lower(),
+              'work clock source loaded': 'scripts/HelperPayrollWorkClock.lua' in mod_desc,
+              'default time basis': '<workerTimeBasis>gameClock</workerTimeBasis>' in config,
+              'default payroll cap': '<maxPayrollTimeScale>10</maxPayrollTimeScale>' in config,
+              'runtime setting': 'workerTimeBasis = "gameClock"' in main,
+              'runtime payroll cap': 'maxPayrollTimeScale = 10' in main,
+              'savegame time-basis persistence': 'helperPayrollSave.policy#workerTimeBasis' in main,
+              'savegame cap persistence': 'helperPayrollSave.policy#maxPayrollTimeScale' in main,
+              'management time-basis UI': 'id="workerTimeBasis"' in menu,
+              'management payroll-cap UI': 'id="maxPayrollTimeScale"' in menu,
+              'effective time scale': 'getEffectiveTimeScale' in clock,
+              'current scale diagnostics': 'getCurrentScales' in clock,
+              'midnight segments': 'workSegments' in clock and 'buildDailyPayrollEntries' in main,
+              'snapshot schema v4': 'SCHEMA_VERSION = 4' in snapshot,
+              'snapshot validated elapsed': 'validatedGameElapsedHours' in snapshot,
+              'snapshot billable elapsed': 'billableGameElapsedHours' in snapshot,
+              'snapshot active segments': 'workSegments = workSegments' in snapshot,
+              'snapshot billable scale': 'billableTimeScale' in snapshot,
+              'public API v5 retained': 'API_VERSION = 5' in api,
+              'public API scale diagnostics': 'effectiveTimeScale' in api and 'billableTimeScale' in api,
+              'external session billable diagnostics': 'billableGameElapsedHours' in external and 'billableTimeScale' in external,
+              'HelperProfiles ownership note': 'HelperPayroll owns **roles, rates, wage accounting, settlement and payroll history**' in readme,
+              'save status format fix': 'tostring(self.settings.workerTimeBasis), tostring(self.settings.maxPayrollTimeScale or 10), tostring(profileId)' in main,
+          }
+          failed = [name for name, ok in checks.items() if not ok]
+          if failed:
+              raise SystemExit('Validation failed: ' + ', '.join(failed))
+          PY
+
+      - name: Validate Lua syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          find scripts -name '*.lua' -print0 | while IFS= read -r -d '' file; do
+            luac -p "$file"
+          done
+
+      - name: Test work-clock accounting
+        shell: bash
+        run: |
+          set -euo pipefail
+          lua <<'LUA'
+          dofile("scripts/HelperPayrollWorkClock.lua")
+
+          local DAY = 24 * 60 * 60 * 1000
+          local scale = 1
+          local clock = {monotonicDay=10, dayTimeMs=8*3600000, dateKey="Y1-M01-D10"}
+          g_currentMission = {
+              timeScale = 1,
+              getEffectiveTimeScale = function() return scale end
+          }
+
+          local owner = {
+              settings = {workerTimeBasis="gameClock", maxPayrollTimeScale=10},
+              getGameClockSnapshot = function() return {
+                  monotonicDay=clock.monotonicDay,
+                  dayTimeMs=clock.dayTimeMs,
+                  dateKey=clock.dateKey
+              } end
+          }
+
+          local function near(a,b,label)
+              if math.abs((a or 0)-(b or 0)) > 0.001 then
+                  error(string.format("%s: expected %.3f got %.3f", label, b, a or -1))
+              end
+          end
+
+          local function testScale(actualScale, cap, expectedBillableScale)
+              owner.settings.workerTimeBasis = "gameClock"
+              owner.settings.maxPayrollTimeScale = cap
+              scale = actualScale
+              clock = {monotonicDay=50, dayTimeMs=8*3600000, dateKey="Y1-M02-D01"}
+              local t = {}
+              HelperPayrollWorkClock.initialise(owner,t)
+              clock.dayTimeMs = clock.dayTimeMs + actualScale * 1000
+              local delta, reason = HelperPayrollWorkClock.accrue(owner,t,1000)
+              near(delta, expectedBillableScale * 1000, tostring(actualScale) .. "x billable delta")
+              near(t.gameElapsedMs, actualScale * 1000, tostring(actualScale) .. "x validated game delta")
+              near(t.billableGameElapsedMs, expectedBillableScale * 1000, tostring(actualScale) .. "x tracked billable delta")
+              if reason ~= "gameClock" then error("unexpected scale reason " .. tostring(reason)) end
+              local effective, billable, configured = HelperPayrollWorkClock.getCurrentScales(owner)
+              near(effective, actualScale, tostring(actualScale) .. "x effective scale")
+              near(billable, expectedBillableScale, tostring(actualScale) .. "x billable scale")
+              near(configured, cap, tostring(actualScale) .. "x configured cap")
+          end
+
+          testScale(1, 10, 1)
+          testScale(5, 10, 5)
+          testScale(10, 10, 10)
+          testScale(30, 10, 10)
+          testScale(60, 10, 10)
+          testScale(120, 10, 10)
+          testScale(360, 10, 10)
+
+          -- Pause: no visible clock movement and effective scale zero.
+          owner.settings.workerTimeBasis = "gameClock"
+          owner.settings.maxPayrollTimeScale = 10
+          scale = 0
+          clock = {monotonicDay=60, dayTimeMs=9*3600000, dateKey="Y1-M02-D02"}
+          local paused = {}
+          HelperPayrollWorkClock.initialise(owner,paused)
+          local delta, reason = HelperPayrollWorkClock.accrue(owner,paused,1000)
+          near(delta,0,"pause")
+          if reason ~= "paused" then error("pause reason=" .. tostring(reason)) end
+
+          -- Implausible sleep/time jump is rejected and re-anchored.
+          scale = 1
+          clock = {monotonicDay=70, dayTimeMs=10*3600000, dateKey="Y1-M02-D03"}
+          local jump = {}
+          HelperPayrollWorkClock.initialise(owner,jump)
+          clock.dayTimeMs = clock.dayTimeMs + 8*3600000
+          delta, reason = HelperPayrollWorkClock.accrue(owner,jump,1000)
+          near(delta,0,"sleep jump ignored")
+          if reason ~= "clock-jump" then error("sleep jump reason=" .. tostring(reason)) end
+          if (jump.clockDiscontinuities or 0) ~= 1 then error("sleep jump discontinuity not counted") end
+          clock.dayTimeMs = clock.dayTimeMs + 1000
+          HelperPayrollWorkClock.accrue(owner,jump,1000)
+          near(jump.elapsedMs,1000,"post jump resumes")
+
+          -- Clock rollback is rejected.
+          clock = {monotonicDay=80, dayTimeMs=12*3600000, dateKey="Y1-M02-D04"}
+          local rollback = {}
+          HelperPayrollWorkClock.initialise(owner,rollback)
+          clock.dayTimeMs = clock.dayTimeMs - 60000
+          delta, reason = HelperPayrollWorkClock.accrue(owner,rollback,1000)
+          near(delta,0,"rollback ignored")
+          if reason ~= "clock-rollback" then error("rollback reason=" .. tostring(reason)) end
+
+          -- Multi-day/period skip is rejected.
+          clock = {monotonicDay=90, dayTimeMs=12*3600000, dateKey="Y1-M02-D05"}
+          local period = {}
+          HelperPayrollWorkClock.initialise(owner,period)
+          clock = {monotonicDay=92, dayTimeMs=12*3600000, dateKey="Y1-M03-D01"}
+          delta, reason = HelperPayrollWorkClock.accrue(owner,period,1000)
+          near(delta,0,"period skip ignored")
+          if reason ~= "day-discontinuity" then error("period skip reason=" .. tostring(reason)) end
+
+          -- Batched clock updates: two frames with no visible clock motion, then a 3-second step.
+          local batched = {}
+          clock = {monotonicDay=100, dayTimeMs=9*3600000, dateKey="Y1-M03-D02"}
+          scale = 1
+          HelperPayrollWorkClock.initialise(owner,batched)
+          HelperPayrollWorkClock.accrue(owner,batched,1000)
+          HelperPayrollWorkClock.accrue(owner,batched,1000)
+          clock.dayTimeMs = clock.dayTimeMs + 3000
+          HelperPayrollWorkClock.accrue(owner,batched,1000)
+          near(batched.elapsedMs,3000,"batched clock update")
+
+          -- Midnight split at the 10x billable cap: 23:50 -> 00:10 next day.
+          local midnight = {}
+          clock = {monotonicDay=110, dayTimeMs=23*3600000+50*60000, dateKey="Y1-M03-D03"}
+          scale = 10
+          HelperPayrollWorkClock.initialise(owner,midnight)
+          clock = {monotonicDay=111, dayTimeMs=10*60000, dateKey="Y1-M03-D04"}
+          HelperPayrollWorkClock.accrue(owner,midnight,120000)
+          near(midnight.elapsedMs,20*60000,"midnight elapsed")
+          local segments = HelperPayrollWorkClock.getSegments(midnight)
+          if #segments ~= 2 then error("expected 2 midnight segments, got " .. tostring(#segments)) end
+          near(segments[1].elapsedMs,10*60000,"pre-midnight segment")
+          near(segments[2].elapsedMs,10*60000,"post-midnight segment")
+
+          -- Unlimited cap restores full accelerated game-clock billing.
+          owner.settings.maxPayrollTimeScale = 0
+          scale = 120
+          clock = {monotonicDay=120, dayTimeMs=12*3600000, dateKey="Y1-M03-D05"}
+          local unlimited = {}
+          HelperPayrollWorkClock.initialise(owner,unlimited)
+          clock.dayTimeMs = clock.dayTimeMs + 120000
+          HelperPayrollWorkClock.accrue(owner,unlimited,1000)
+          near(unlimited.elapsedMs,120000,"unlimited 120x")
+          near(unlimited.gameElapsedMs,120000,"unlimited validated time")
+          near(unlimited.billableGameElapsedMs,120000,"unlimited billable time")
+
+          -- Legacy real-time mode ignores accelerated game clock.
+          owner.settings.workerTimeBasis = "realTime"
+          owner.settings.maxPayrollTimeScale = 10
+          scale = 120
+          clock = {monotonicDay=130, dayTimeMs=12*3600000, dateKey="Y1-M03-D06"}
+          local realtime = {}
+          HelperPayrollWorkClock.initialise(owner,realtime)
+          clock.dayTimeMs = clock.dayTimeMs + 120000
+          HelperPayrollWorkClock.accrue(owner,realtime,1000)
+          near(realtime.elapsedMs,1000,"legacy real time")
+          LUA
+
+      - name: Build validation package
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f FS25_HelperPayroll.zip FS25_HelperPayroll.zip.sha256
+          zip -r FS25_HelperPayroll.zip modDesc.xml HelperPayroll_icon.dds config gui scripts -x '*.DS_Store' '*__MACOSX*'
+          sha256sum FS25_HelperPayroll.zip | tee FS25_HelperPayroll.zip.sha256
+          unzip -t FS25_HelperPayroll.zip
+
+      - name: Upload validation package
+        uses: actions/upload-artifact@v4
+        with:
+          name: FS25_HelperPayroll-0.4.4.0-alpha1-validation
+          path: |
+            FS25_HelperPayroll.zip
+            FS25_HelperPayroll.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
