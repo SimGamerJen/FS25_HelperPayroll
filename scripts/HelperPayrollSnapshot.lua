@@ -83,6 +83,7 @@ local function buildActiveJobs(owner)
                     gameDate = tostring(segment.gameDate or assignment.gameDate or "unknown"),
                     monotonicDay = tonumber(segment.monotonicDay),
                     elapsedHours = round(segmentHours, 3),
+                    billableElapsedHours = round(segmentHours, 3),
                     labourEstimate = round(segmentLabour, 2),
                     chargeEstimate = round(segmentCharge, 2)
                 })
@@ -110,6 +111,8 @@ local function buildActiveJobs(owner)
             elapsedHours = elapsedHours,
             realElapsedHours = (tonumber(tracked.realElapsedMs) or 0) / 3600000,
             gameElapsedHours = (tonumber(tracked.gameElapsedMs) or 0) / 3600000,
+            validatedGameElapsedHours = (tonumber(tracked.gameElapsedMs) or 0) / 3600000,
+            billableGameElapsedHours = (tonumber(tracked.billableGameElapsedMs) or tonumber(tracked.elapsedMs) or 0) / 3600000,
             timeBasis = tostring(tracked.timeBasis or (owner.settings ~= nil and owner.settings.workerTimeBasis) or "gameClock"),
             effectiveTimeScale = tonumber(tracked.lastEffectiveTimeScale) or 0,
             billableTimeScale = tonumber(tracked.lastBillableTimeScale) or 0,
@@ -244,6 +247,10 @@ function HelperPayrollSnapshot.build(owner, options)
     }
     local activeExternalSessions = HelperPayrollExternalSessions ~= nil and HelperPayrollExternalSessions.getActive ~= nil
         and HelperPayrollExternalSessions.getActive(owner) or {}
+    local effectiveScale, billableScale, configuredCap = 0, 0, tonumber(owner.settings ~= nil and owner.settings.maxPayrollTimeScale or 10) or 10
+    if HelperPayrollWorkClock ~= nil and HelperPayrollWorkClock.getCurrentScales ~= nil then
+        effectiveScale, billableScale, configuredCap = HelperPayrollWorkClock.getCurrentScales(owner)
+    end
 
     local snapshot = {
         schemaVersion = HelperPayrollSnapshot.SCHEMA_VERSION,
@@ -261,7 +268,11 @@ function HelperPayrollSnapshot.build(owner, options)
             authority = "singlePlayerMission",
             multiplayerSupported = false,
             transportReadySchema = true,
-            externalWorkerSessionsSupported = HelperPayrollExternalSessions ~= nil
+            externalWorkerSessionsSupported = HelperPayrollExternalSessions ~= nil,
+            workerTimeBasis = tostring(owner.settings ~= nil and owner.settings.workerTimeBasis or "gameClock"),
+            effectiveTimeScale = tonumber(effectiveScale) or 0,
+            billableTimeScale = tonumber(billableScale) or 0,
+            maxPayrollTimeScale = tonumber(configuredCap) or 10
         },
         compatibility = compatibility,
         roster = {
