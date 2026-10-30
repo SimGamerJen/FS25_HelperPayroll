@@ -14,8 +14,8 @@ local hpGetTimeMs
 
 HelperPayroll = {}
 HelperPayroll.MOD_NAME = g_currentModName or "FS25_HelperPayroll"
-HelperPayroll.VERSION = "0.4.3.0"
-HelperPayroll.RELEASE_CHANNEL = "alpha2"
+HelperPayroll.VERSION = "0.4.4.0"
+HelperPayroll.RELEASE_CHANNEL = "alpha1"
 HelperPayroll.TARGET_HELPER_SLOTS = 20
 HelperPayroll.MOD_DIRECTORY = g_currentModDirectory or ""
 HelperPayroll.BUNDLED_CONFIG_FILE = HelperPayroll.MOD_DIRECTORY .. "config/defaultPayrollConfig.xml"
@@ -5600,7 +5600,7 @@ function HelperPayroll:printSaveSettingsStatus()
         tostring(self.persistence ~= nil and self.persistence.filePath or "nil"),
         tostring(self.persistence ~= nil and self.persistence.loaded == true))
     hpayPrintf("Effective active values: payrollMode=%s billingMode=%s timeBasis=%s maxPayrollTimeScale=%s profile=%s selectedRole=%s name=%s rate=%.2f fallbackRole=%s minimum=%.2f callout=%.2f payrollHour=%s round=%s helperProfilesMappings=%d",
-        tostring(self.settings.payrollMode), tostring(self.settings.billingMode), tostring(self.settings.workerTimeBasis), tostring(profileId), tostring(roleId), tostring(roleName), tonumber(rate) or 0, tostring(self.settings.fallbackRole), tonumber(self.settings.minimumWorkerCharge) or 0, tonumber(self.settings.workerCalloutFee) or 0, tostring(self.settings.payrollHour), tostring(self.settings.roundWorkerCharges), #(self.helperProfilesMappings or {}))
+        tostring(self.settings.payrollMode), tostring(self.settings.billingMode), tostring(self.settings.workerTimeBasis), tostring(self.settings.maxPayrollTimeScale or 10), tostring(profileId), tostring(roleId), tostring(roleName), tonumber(rate) or 0, tostring(self.settings.fallbackRole), tonumber(self.settings.minimumWorkerCharge) or 0, tonumber(self.settings.workerCalloutFee) or 0, tostring(self.settings.payrollHour), tostring(self.settings.roundWorkerCharges), #(self.helperProfilesMappings or {}))
 end
 
 function HelperPayroll:hpayConfig(...)
@@ -5715,6 +5715,12 @@ function HelperPayroll:hpayDump(...)
         local payrollHour = tonumber(self.settings.payrollHour) or 18
         hpayPrintf("Payroll clock: date=%s monotonicDay=%s dayTimeMs=%s hour=%s payrollHour=%s pendingRows=%d",
             tostring(clock.dateKey), tostring(clock.monotonicDay), tostring(clock.dayTimeMs), tostring(clock.hour), tostring(payrollHour), self:countPendingDailyPayrollRows())
+        local effectiveScale, billableScale, configuredCap = 0, 0, tonumber(self.settings.maxPayrollTimeScale) or 10
+        if HelperPayrollWorkClock ~= nil and HelperPayrollWorkClock.getCurrentScales ~= nil then
+            effectiveScale, billableScale, configuredCap = HelperPayrollWorkClock.getCurrentScales(self)
+        end
+        hpayPrintf("Worker time accounting: basis=%s effectiveTimeScale=%.1f billableTimeScale=%.1f maxPayrollTimeScale=%s",
+            tostring(self.settings.workerTimeBasis or "gameClock"), tonumber(effectiveScale) or 0, tonumber(billableScale) or 0, tostring(configuredCap))
         for key, daily in pairs(self.workerDailyLedger or {}) do
             if daily ~= nil and daily.payrollApplied ~= true and (tonumber(daily.jobs) or 0) > 0 then
                 local due, reason = self:isDailyPayrollRowDue(daily, clock, payrollHour)
@@ -5727,6 +5733,10 @@ function HelperPayroll:hpayDump(...)
         local roleId, roleName, rate, profileId = self:getSelectedRoleInfo()
         local hpStatus = self:getHelperProfilesStatus()
         local compatibility = self:getCompatibilityStatus()
+        local effectiveScale, billableScale, configuredCap = 0, 0, tonumber(self.settings.maxPayrollTimeScale) or 10
+        if HelperPayrollWorkClock ~= nil and HelperPayrollWorkClock.getCurrentScales ~= nil then
+            effectiveScale, billableScale, configuredCap = HelperPayrollWorkClock.getCurrentScales(self)
+        end
         hpayPrintf("Status: version=%s channel=%s payrollMode=%s billingMode=%s profile=%s selectedRole=%s name=%s rate=%.2f trackedJobs=%d pendingRows=%d helperProfilesLoaded=%s helperProfilesApi=%s helperProfilesApiVersion=%s payrollEnabled=%s compatibilityBlocked=%s conflict=%s authority=singlePlayerMission multiplayerSupported=false snapshotSchema=%s roleListVisible=%s reportOverlayVisible=%s reportPage=%s saveFile=%s globalPolicySource=%s globalPolicyFile=%s",
             tostring(self.VERSION or "0.3.3.0"), tostring(self.RELEASE_CHANNEL or "beta-rc"),
             tostring(self.settings.payrollMode), tostring(self.settings.billingMode), tostring(profileId), tostring(roleId), tostring(roleName), tonumber(rate) or 0,
@@ -5736,6 +5746,8 @@ function HelperPayroll:hpayDump(...)
             tostring(HelperPayrollSnapshot ~= nil and HelperPayrollSnapshot.SCHEMA_VERSION or 1),
             tostring(self.roleListVisible == true), tostring(self.reportOverlayVisible == true), tostring(self.reportOverlayPage or 1),
             tostring(self.persistence ~= nil and self.persistence.filePath or "nil"), tostring(self.policyConfig ~= nil and self.policyConfig.source or "unknown"), tostring(self.CONFIG_FILE))
+        hpayPrintf("Worker time accounting: basis=%s effectiveTimeScale=%.1f billableTimeScale=%.1f maxPayrollTimeScale=%s",
+            tostring(self.settings.workerTimeBasis or "gameClock"), tonumber(effectiveScale) or 0, tonumber(billableScale) or 0, tostring(configuredCap))
         return
     end
 
@@ -5811,6 +5823,12 @@ function HelperPayroll:logRuntimeStartupStatus()
         tostring(compatibility.blocked == true),
         tostring(compatibility.primaryConflictName or "none"),
         tostring(HelperPayrollSnapshot ~= nil and HelperPayrollSnapshot.SCHEMA_VERSION or 1))
+    local effectiveScale, billableScale, configuredCap = 0, 0, tonumber(self.settings.maxPayrollTimeScale) or 10
+    if HelperPayrollWorkClock ~= nil and HelperPayrollWorkClock.getCurrentScales ~= nil then
+        effectiveScale, billableScale, configuredCap = HelperPayrollWorkClock.getCurrentScales(self)
+    end
+    rcLog("Worker time accounting: basis=%s effectiveTimeScale=%.1f billableTimeScale=%.1f maxPayrollTimeScale=%s",
+        tostring(self.settings.workerTimeBasis or "gameClock"), tonumber(effectiveScale) or 0, tonumber(billableScale) or 0, tostring(configuredCap))
 end
 
 function HelperPayroll:processStartupStatus(dt)
