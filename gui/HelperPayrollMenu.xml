@@ -21,7 +21,7 @@
         <GuiElement profile="fs25_subCategorySelectorTabbedContainer" id="hpayMainPage">
             <Bitmap position="-20px 150px" size="1525px 615px" imageColor="0.015 0.017 0.015 0.28"/>
             <!-- Contextual subviews keep specialist controls accessible without crowding the primary navigation. -->
-            <GuiElement id="workforceSubNav" position="0px 615px" size="1480px 46px">
+            <GuiElement id="workforceSubNav" position="0px 685px" size="1480px 46px">
                 <Button profile="hpayActionButton" id="workforceSubTabs[1]" position="0px 0px" size="205px 36px" text="TEAM" onClick="onClickSubView1"/>
                 <Button profile="hpayActionButton" id="workforceSubTabs[2]" position="220px 0px" size="205px 36px" text="WORKER PAY" onClick="onClickSubView2"/>
                 <Button profile="hpayActionButton" id="workforceSubTabs[3]" position="440px 0px" size="205px 36px" text="HELP" onClick="onClickSubView3"/>
@@ -30,7 +30,7 @@
 
             <Text id="bodyTextElement" text="" position="40px 150px" size="1480px 585px" textSize="16px" textColor="0.88 0.90 0.86 1" textVerticalAlignment="top" textAlignment="left" textMaxNumLines="36"/>
 
-            <GuiElement id="tableContainer" visible="false" position="0px 170px" size="1520px 545px">
+            <GuiElement id="tableContainer" visible="false" position="0px 125px" size="1520px 545px">
                 <GuiElement id="tableListArea" position="0px 0px" size="1520px 545px">
                     <GuiElement profile="fs25_statisticsHeaderBox" position="0px -18px" size="1465px 38px">
                         <Text profile="hpayColumnHeader" id="columnItem" position="20px -3px" size="420px 34px" text="Item"/>
