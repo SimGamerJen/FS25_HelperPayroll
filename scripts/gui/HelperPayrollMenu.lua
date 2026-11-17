@@ -329,7 +329,16 @@ function HelperPayrollMenu:buildRows()
             table.insert(rows, {
                 slot = tostring(member.slot or "?"),
                 member = member,
-                label = string.format("%s  %s", tostring(member.slot or "?"), tostring(member.displayName or "Worker")),
+                -- Keep the permanent slot in its own column. Raw default
+                -- names ("A", "B", etc.) must not look like duplicate IDs.
+                label = (function()
+                    local slot = tostring(member.slot or "?")
+                    local name = tostring(member.displayName or "")
+                    if name == "" or string.upper(name) == string.upper(slot) then
+                        return "Helper " .. slot
+                    end
+                    return name
+                end)(),
                 status = member.enabled == false and "OFF"
                     or (member.inUse == true and "WORKING" or (member.selected == true and "SELECTED" or "AVAILABLE")),
                 info = "Workforce roster member"
@@ -552,6 +561,13 @@ function HelperPayrollMenu:populateCellForItemInSection(list, section, index, ce
         local e = cell.getDescendantByName ~= nil and cell:getDescendantByName(name) or nil
         if e ~= nil and e.setText ~= nil then e:setText(tostring(value or "")) end
         return e
+    end
+
+    if list == self.workforceRosterList then
+        set("cellSlot", row.slot or "?")
+        set("cellItem", row.label)
+        set("cellStatus", row.status or "")
+        return
     end
 
     local editable = row.editType ~= nil
