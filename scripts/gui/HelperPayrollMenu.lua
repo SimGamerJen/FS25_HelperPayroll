@@ -615,7 +615,21 @@ function HelperPayrollMenu:updateMemberProfile()
         (member.selected == true and "  |  SELECTED HELPER" or ""))
     -- A family/permanent/seasonal relationship is not currently stored. Do
     -- not infer one from role, payroll rate or availability.
-    self:setTextSafe(self.memberRelationship, member ~= nil and "Not assigned" or "-")
+    local relationship = member ~= nil and FarmWorkforceRelationships ~= nil
+        and FarmWorkforceRelationships.get(HelperPayroll, member.slot) or "unassigned"
+    self:setTextSafe(self.memberRelationship, member ~= nil and
+        (FarmWorkforceRelationships ~= nil and FarmWorkforceRelationships.label(relationship) or "Not assigned") or "-")
+    self:setDisabledSafe(self.relationPrevious, member == nil)
+    self:setDisabledSafe(self.relationNext, member == nil)
+    if member ~= nil then
+        local first = tostring(member.displayName or "?"):match("%a")
+        self:setTextSafe(self.memberInitials, first ~= nil and string.upper(first) or "?")
+    else
+        self:setTextSafe(self.memberInitials, "?")
+    end
+    self:setTextSafe(self.memberProfileNotice, self.relationshipSaveFailed == true and
+        "Relationship save failed. Check the log and your modSettings path." or
+        "Use arrows to set relationship; changes save immediately and never affect wages.")
     self:setTextSafe(self.memberRole, member ~= nil and profileRoleLabel(member.roleId) or "-")
     self:setTextSafe(self.memberPayBasis, member ~= nil and
         (member.payBasis == "daily" and "Per game day" or "Per worked hour") or "-")
@@ -897,6 +911,23 @@ function HelperPayrollMenu:onPagePrevious()
     if idx < 1 then idx = #TAB_TOPICS end
     self:showTopic(TAB_TOPICS[idx])
 end
+
+function HelperPayrollMenu:cycleRelationship(direction)
+    if self.currentTopic ~= "workforce" or self.selectedRow == nil or self.selectedRow.member == nil then return end
+    local slot = self.selectedRow.member.slot
+    if FarmWorkforceRelationships == nil then
+        self.relationshipSaveFailed = true
+        self:updateMemberProfile()
+        return
+    end
+    local ok = FarmWorkforceRelationships.next(HelperPayroll, slot, direction)
+    self.relationshipSaveFailed = not ok
+    if not ok then print("[FarmWorkforce] Relationship write failed for slot " .. tostring(slot)) end
+    self:updateMemberProfile()
+end
+
+function HelperPayrollMenu:onClickRelationshipPrevious() self:cycleRelationship(-1) end
+function HelperPayrollMenu:onClickRelationshipNext() self:cycleRelationship(1) end
 
 function HelperPayrollMenu:onClickSubView(index)
     self:cancelResetConfirmation()
