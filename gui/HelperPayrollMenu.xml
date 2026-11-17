@@ -51,16 +51,16 @@
                 <!-- Shift only the member details; roster placement is already game-validated. -->
                 <GuiElement id="memberDetailsLayout" position="0px -400px" size="1480px 545px">
                     <Text profile="hpayDetailsHeader" position="540px 479px" size="850px 32px" text="MEMBER DETAILS"/>
-                    <Bitmap position="540px 394px" size="62px 62px" imageColor="0.20 0.27 0.13 0.95"/>
-                    <Text profile="hpayDetailsTitle" id="memberInitials" position="540px 405px" size="62px 40px" text="?" textAlignment="center"/>
+                    <ThreePartBitmap profile="fs25_subCategorySelectorTabbedTabBg" position="540px 394px" size="62px 62px"/>
+                    <Text profile="hpayDetailsTitle" id="memberInitials" position="540px 404px" size="62px 44px" text="?" textAlignment="center" textVerticalAlignment="middle"/>
                     <Text profile="hpayDetailsTitle" id="memberName" position="620px 425px" size="770px 53px" text="Select a member"/>
                     <Text profile="hpayDetailsLabel" id="memberState" position="620px 386px" size="770px 32px" text=""/>
                     <Bitmap position="540px 361px" size="860px 2px" imageColor="0.50 0.72 0.10 0.65"/>
 
                     <Text profile="hpayDetailsHeader" position="540px 321px" size="310px 30px" text="RELATIONSHIP"/>
-                    <Button profile="hpayInlineAdjustButton" id="relationPrevious" position="920px 321px" size="40px 30px" text="&lt;" onClick="onClickRelationshipPrevious"/>
-                    <Text profile="hpayDetailsValue" id="memberRelationship" position="973px 321px" size="330px 30px" text="Not assigned"/>
-                    <Button profile="hpayInlineAdjustButton" id="relationNext" position="1325px 321px" size="40px 30px" text="&gt;" onClick="onClickRelationshipNext"/>
+                    <Button profile="hpayInlineAdjustButton" id="relationPrevious" position="1110px 321px" size="40px 30px" text="&lt;" onClick="onClickRelationshipPrevious"/>
+                    <Text profile="hpayDetailsValue" id="memberRelationship" position="1160px 321px" size="145px 30px" text="Not assigned"/>
+                    <Button profile="hpayInlineAdjustButton" id="relationNext" position="1320px 321px" size="40px 30px" text="&gt;" onClick="onClickRelationshipNext"/>
                     <Text profile="hpayDetailsHeader" position="540px 281px" size="310px 30px" text="FARM ROLE"/>
                     <Text profile="hpayDetailsValue" id="memberRole" position="885px 281px" size="505px 30px" text=""/>
 
