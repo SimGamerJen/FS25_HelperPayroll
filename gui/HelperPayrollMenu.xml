@@ -48,12 +48,16 @@
                 <!-- Shift only the member details; roster placement is already game-validated. -->
                 <GuiElement id="memberDetailsLayout" position="0px -400px" size="1480px 545px">
                     <Text profile="hpayDetailsHeader" position="540px 479px" size="850px 32px" text="MEMBER DETAILS"/>
-                    <Text profile="hpayDetailsTitle" id="memberName" position="540px 425px" size="850px 53px" text="Select a member"/>
-                    <Text profile="hpayDetailsLabel" id="memberState" position="540px 386px" size="850px 32px" text=""/>
+                    <Bitmap position="540px 394px" size="62px 62px" imageColor="0.20 0.27 0.13 0.95"/>
+                    <Text profile="hpayDetailsTitle" id="memberInitials" position="540px 405px" size="62px 40px" text="?" textAlignment="center"/>
+                    <Text profile="hpayDetailsTitle" id="memberName" position="620px 425px" size="770px 53px" text="Select a member"/>
+                    <Text profile="hpayDetailsLabel" id="memberState" position="620px 386px" size="770px 32px" text=""/>
                     <Bitmap position="540px 361px" size="860px 2px" imageColor="0.50 0.72 0.10 0.65"/>
 
                     <Text profile="hpayDetailsHeader" position="540px 321px" size="310px 30px" text="RELATIONSHIP"/>
-                    <Text profile="hpayDetailsValue" id="memberRelationship" position="885px 321px" size="505px 30px" text="Not assigned"/>
+                    <Button profile="hpayInlineAdjustButton" id="relationPrevious" position="920px 321px" size="40px 30px" text="&lt;" onClick="onClickRelationshipPrevious"/>
+                    <Text profile="hpayDetailsValue" id="memberRelationship" position="973px 321px" size="330px 30px" text="Not assigned"/>
+                    <Button profile="hpayInlineAdjustButton" id="relationNext" position="1325px 321px" size="40px 30px" text="&gt;" onClick="onClickRelationshipNext"/>
                     <Text profile="hpayDetailsHeader" position="540px 281px" size="310px 30px" text="FARM ROLE"/>
                     <Text profile="hpayDetailsValue" id="memberRole" position="885px 281px" size="505px 30px" text=""/>
 
@@ -65,7 +69,7 @@
                     <Text profile="hpayDetailsValue" id="memberPayRate" position="885px 144px" size="505px 30px" text=""/>
                     <Text profile="hpayDetailsLabel" position="540px 106px" size="310px 30px" text="Compensation"/>
                     <Text profile="hpayDetailsValue" id="memberCompensation" position="885px 106px" size="505px 30px" text=""/>
-                    <Text profile="hpayDetailsInfo" position="540px 34px" size="865px 55px" text="Relationships are not yet configured. Pay changes remain under WORKER PAY."/>
+                    <Text profile="hpayDetailsInfo" id="memberProfileNotice" position="540px 34px" size="865px 55px" text="Use arrows to assign a relationship. Saved per game; wages remain unchanged."/>
                 </GuiElement>
             </GuiElement>
 
