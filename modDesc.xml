@@ -55,6 +55,7 @@
         <sourceFile filename="scripts/HelperPayrollExternalSessions.lua" />
         <sourceFile filename="scripts/HelperPayrollSnapshot.lua" />
         <sourceFile filename="scripts/HelperPayrollPublicAPI.lua" />
+        <sourceFile filename="scripts/FarmWorkforceRelationships.lua" />
         <sourceFile filename="scripts/gui/HelperPayrollMenu.lua" />
         <sourceFile filename="scripts/HelperPayroll.lua" />
     </extraSourceFiles>
