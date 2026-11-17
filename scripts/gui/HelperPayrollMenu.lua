@@ -634,6 +634,24 @@ function HelperPayrollMenu:updateMemberProfile()
     self:setTextSafe(self.memberProfileNotice, self.relationshipSaveFailed == true and
         "Relationship save failed. Check the log and your modSettings path." or
         "Use arrows to set relationship; changes save immediately and never affect wages.")
+    -- Appearance is resolved from the optional HelperProfiles API, not from
+    -- payroll identity IDs (which may be aliases or preset references).
+    local appearance = "Not linked"
+    if member ~= nil and HelperPayroll ~= nil
+        and type(HelperPayroll.getHelperProfilesSlotInfo) == "function" then
+        local ok, slotInfo = pcall(HelperPayroll.getHelperProfilesSlotInfo, HelperPayroll, member.slot)
+        if ok and type(slotInfo) == "table" then
+            local label = slotInfo.appearanceLabel
+            if label ~= nil and tostring(label) ~= "" then
+                appearance = tostring(label)
+            elseif slotInfo.presetId ~= nil and tostring(slotInfo.presetId) ~= "" then
+                appearance = "Preset assigned"
+            else
+                appearance = "Default appearance"
+            end
+        end
+    end
+    self:setTextSafe(self.memberAppearance, member ~= nil and ("Appearance: " .. appearance) or "")
     self:setTextSafe(self.memberRole, member ~= nil and profileRoleLabel(member.roleId) or "-")
     self:setTextSafe(self.memberPayBasis, member ~= nil and
         (member.payBasis == "daily" and "Per game day" or "Per worked hour") or "-")
