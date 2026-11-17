@@ -37,21 +37,31 @@
             <GuiElement id="workforceProfilePanel" visible="false" position="0px 125px" size="1480px 545px">
                 <Bitmap position="0px 0px" size="490px 535px" imageColor="0.05 0.065 0.05 0.92"/>
                 <Bitmap position="510px 0px" size="960px 535px" imageColor="0.045 0.055 0.047 0.92"/>
-                <Text profile="hpayDetailsTitle" position="20px 480px" size="445px 36px" text="YOUR WORKFORCE"/>
-                <Text profile="hpayDetailsLabel" id="workforceRosterSummary" position="20px 443px" size="445px 30px" text="Loading team..."/>
+                <Text profile="hpayDetailsTitle" position="20px 490px" size="445px 36px" text="YOUR WORKFORCE"/>
+                <Text profile="hpayDetailsLabel" id="workforceRosterSummary" position="20px 462px" size="445px 25px" text="Loading team..."/>
+                <Bitmap profile="baseReference" position="12px 424px" size="460px 31px" imageColor="0.09 0.13 0.07 0.88"/>
+                <Text profile="hpayColumnHeader" position="16px 426px" size="54px 25px" text="SLOT" textAlignment="center"/>
+                <Text profile="hpayColumnHeader" position="78px 426px" size="220px 25px" text="WORKER" textAlignment="left"/>
+                <Text profile="hpayColumnHeader" position="310px 426px" size="155px 25px" text="STATUS" textAlignment="center"/>
                 <SmoothList id="workforceRosterList" profile="hpayListWide" position="12px 34px" size="460px 390px" listItemSpacing="-1px">
                     <ListItem profile="hpayListItem">
                         <ThreePartBitmap profile="hpayListItemGradient" name="alternating"/>
-                        <Text profile="hpayRowCellLeft" position="14px 0px" size="246px 34px" name="cellItem"/>
-                        <Text profile="hpayRowCellCenter" position="262px 0px" size="182px 34px" name="cellStatus"/>
+                        <Text profile="hpayRowCellCenter" position="14px 0px" size="54px 34px" name="cellSlot"/>
+                        <Text profile="hpayRowCellLeft" position="78px 0px" size="220px 34px" name="cellItem"/>
+                        <Text profile="hpayRowCellCenter" position="310px 0px" size="155px 34px" name="cellStatus"/>
                     </ListItem>
                 </SmoothList>
                 <ThreePartBitmap profile="hpaySliderBoxTall" position="472px 34px" size="6px 390px" id="workforceRosterSliderBox"><Slider profile="fs25_listSlider" dataElementId="workforceRosterList"/></ThreePartBitmap>
 
                 <!-- Shift only the member details; roster placement is already game-validated. -->
                 <GuiElement id="memberDetailsLayout" position="0px -400px" size="1480px 545px">
-                    <Text profile="hpayDetailsHeader" position="540px 479px" size="850px 32px" text="MEMBER DETAILS"/>
-                    <ThreePartBitmap profile="fs25_subCategorySelectorTabbedTabBg" position="540px 394px" size="62px 62px"/>
+                    <!-- Stronger visual identity and profile grouping; no invented portraits. -->
+                    <Bitmap profile="baseReference" position="523px 332px" size="903px 185px" imageColor="0.085 0.12 0.075 0.90"/>
+                    <Bitmap profile="baseReference" position="523px 235px" size="903px 96px" imageColor="0.065 0.08 0.067 0.88"/>
+                    <Bitmap profile="baseReference" position="523px 12px" size="903px 220px" imageColor="0.065 0.08 0.067 0.88"/>
+                    <Bitmap profile="baseReference" position="523px 514px" size="903px 3px" imageColor="0.60 0.82 0.12 0.95"/>
+                    <Text profile="hpayDetailsHeader" position="540px 479px" size="850px 32px" text="PERSONAL PROFILE"/>
+                    <Bitmap profile="baseReference" position="540px 394px" size="62px 62px" imageColor="0.50 0.72 0.10 0.90"/>
                     <Text profile="hpayDetailsTitle" id="memberInitials" position="540px 404px" size="62px 44px" text="?" textAlignment="center" textVerticalAlignment="middle"/>
                     <Text profile="hpayDetailsTitle" id="memberName" position="620px 425px" size="770px 53px" text="Select a member"/>
                     <Text profile="hpayDetailsLabel" id="memberState" position="620px 386px" size="770px 32px" text=""/>
@@ -66,7 +76,7 @@
                     <Text profile="hpayDetailsValue" id="memberRole" position="885px 253px" size="505px 30px" text=""/>
 
                     <Bitmap position="540px 227px" size="860px 2px" imageColor="0.32 0.38 0.30 0.7"/>
-                    <Text profile="hpayDetailsHeader" position="540px 198px" size="850px 30px" text="PAYROLL"/>
+                    <Text profile="hpayDetailsHeader" position="540px 198px" size="850px 30px" text="PAYROLL ARRANGEMENTS"/>
                     <Text profile="hpayDetailsLabel" position="540px 160px" size="310px 30px" text="Pay basis"/>
                     <Text profile="hpayDetailsValue" id="memberPayBasis" position="885px 160px" size="505px 30px" text=""/>
                     <Text profile="hpayDetailsLabel" position="540px 125px" size="310px 30px" text="Effective rate"/>
