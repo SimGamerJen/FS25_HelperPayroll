@@ -135,7 +135,7 @@ end
 
 function HelperPayrollMenu:update(dt)
     HelperPayrollMenu:superClass().update(self, dt)
-    if self.currentTopic ~= "dashboard" then return end
+    if self.currentTopic ~= "dashboard" and self.currentTopic ~= "workforce" then return end
 
     self.liveRefreshAccumulatorMs = (tonumber(self.liveRefreshAccumulatorMs) or 0) + (tonumber(dt) or 0)
     if self.liveRefreshAccumulatorMs < 1000 then return end
