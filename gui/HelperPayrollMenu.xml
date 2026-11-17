@@ -45,6 +45,8 @@
                 </SmoothList>
                 <ThreePartBitmap profile="hpaySliderBoxTall" position="472px 34px" size="6px 390px" id="workforceRosterSliderBox"><Slider profile="fs25_listSlider" dataElementId="workforceRosterList"/></ThreePartBitmap>
 
+                <!-- Shift only the member details; roster placement is already game-validated. -->
+                <GuiElement id="memberDetailsLayout" position="0px -400px" size="1480px 545px">
                 <Text profile="hpayDetailsHeader" position="540px 479px" size="880px 32px" text="WORKFORCE MEMBER"/>
                 <Text profile="hpayDetailsTitle" id="memberName" position="540px 424px" size="860px 53px" text="Select a member"/>
                 <Text profile="hpayDetailsLabel" id="memberState" position="540px 384px" size="860px 32px" text=""/>
@@ -59,6 +61,7 @@
                 <Text profile="hpayDetailsValue" id="memberCompensation" position="900px 176px" size="490px 30px" text=""/>
                 <Text profile="hpayDetailsLabel" id="memberIdentity" position="540px 93px" size="865px 56px" text="" textMaxNumLines="2"/>
                 <Text profile="hpayDetailsInfo" position="540px 25px" size="865px 50px" text="Member profiles are read-only in this preview. Use WORKER PAY to adjust role and wage settings."/>
+                </GuiElement>
             </GuiElement>
 
             <GuiElement id="tableContainer" visible="false" position="0px 125px" size="1520px 545px">
