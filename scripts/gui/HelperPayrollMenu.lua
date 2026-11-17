@@ -47,6 +47,7 @@ function HelperPayrollMenu.new(target, customMt)
     self.currentTopic = "workforce"
     self.rows = {}
     self.selectedRowIndex = nil
+    self.selectedWorkforceSlot = nil
     self.selectedRow = nil
     self.draftSettings = {}
     self.draftRolePolicies = {}
@@ -153,17 +154,20 @@ function HelperPayrollMenu:update(dt)
 
     local selectedIndex = tonumber(self.selectedRowIndex) or 1
     self:buildRows()
-    if self.itemList ~= nil then
-        self.itemList:reloadData()
-        if #self.rows > 0 and self.itemList.setSelectedIndex ~= nil then
+    local activeList = self.currentTopic == "workforce" and self.workforceRosterList or self.itemList
+    if activeList ~= nil then
+        activeList:reloadData()
+        if #self.rows > 0 and activeList.setSelectedIndex ~= nil then
             selectedIndex = math.max(1, math.min(selectedIndex, #self.rows))
-            pcall(function() self.itemList:setSelectedIndex(selectedIndex, true) end)
+            pcall(function() activeList:setSelectedIndex(selectedIndex, true) end)
         end
     end
     self.selectedRowIndex = selectedIndex
     self.selectedRow = self.rows[selectedIndex]
-    self:setVisibleSafe(self.itemListSliderBox, #self.rows > 14)
+    self:setVisibleSafe(self.itemListSliderBox, #self.rows > 14 and self.currentTopic ~= "workforce")
+    self:setVisibleSafe(self.workforceRosterSliderBox, self.currentTopic == "workforce" and #self.rows > 10)
     self:updateSelectedDetails()
+    self:updateMemberProfile()
 end
 
 function HelperPayrollMenu:onGuiSetupFinished()
@@ -172,6 +176,10 @@ function HelperPayrollMenu:onGuiSetupFinished()
     if self.itemList ~= nil then
         self.itemList:setDataSource(self)
         self.itemList:setDelegate(self)
+    end
+    if self.workforceRosterList ~= nil then
+        self.workforceRosterList:setDataSource(self)
+        self.workforceRosterList:setDelegate(self)
     end
     self:initialiseEditControls()
     self:refreshDraftFromRuntime()
@@ -292,6 +300,14 @@ function HelperPayrollMenu:showTopic(topic)
     self.selectedRowIndex = 1
     self.selectedRow = nil
     self:buildRows()
+    if self.currentTopic == "workforce" and self.selectedWorkforceSlot ~= nil then
+        for index, row in ipairs(self.rows) do
+            if row.slot == self.selectedWorkforceSlot then
+                self.selectedRowIndex = index
+                break
+            end
+        end
+    end
     self:updateContent()
 end
 
@@ -302,30 +318,17 @@ function HelperPayrollMenu:buildRows()
     local profileId = (hp ~= nil and hp.settings ~= nil and hp.settings.activePayrollProfile) or self.draftSettings.activePayrollProfile or "default"
 
     if topic == "workforce" then
-        -- Read-only presentation: the payroll snapshot is the authoritative
-        -- source for member identities, roles and employment cost policy.
         local snapshot = hp ~= nil and hp.getPayrollSnapshot ~= nil
             and hp:getPayrollSnapshot({includeWorkers=true, includeDisabledWorkers=true}) or {}
-        local roster = snapshot.roster or {}
-        local counts = snapshot.counts or {}
-        rows = {
-            {label="FARM WORKFORCE", value=tostring(counts.managedWorkers or 0) .. " members",
-                status=string.format("%d ON / %d OFF", tonumber(counts.enabledWorkers) or 0, tonumber(counts.disabledWorkers) or 0),
-                source=roster.availabilitySupported == true and "HelperProfiles" or "Standalone payroll",
-                info="Each worker is identified by their permanent helper slot. Relationship and family information are planned, not stored in this build."}
-        }
+        self.workforceSnapshot = snapshot
         for _, member in ipairs(snapshot.workers or {}) do
-            local status = member.enabled == false and "OFF roster"
-                or (member.inUse == true and "Working" or "Available")
-            local selected = member.selected == true and " | selected" or ""
             table.insert(rows, {
-                label=string.format("%s  %s", tostring(member.slot or "?"), tostring(member.displayName or "Worker")),
-                value=tostring(member.roleId or "standard"),
-                status=status .. selected,
-                source=string.format("%.2f/%s", tonumber(member.payRate) or 0, member.payBasis == "daily" and "day" or "hr"),
-                info=string.format("Payroll identity: %s | Compensation: %s | Role: %s | Roster: %s. This is read-only; use WORKER PAY or SETTINGS > ROLES to edit.",
-                    tostring(member.identityId or "unknown"), tostring(member.compensationMode or "inherit"),
-                    tostring(member.roleId or "standard"), tostring(member.rosterState or "unknown"))
+                slot = tostring(member.slot or "?"),
+                member = member,
+                label = string.format("%s  %s", tostring(member.slot or "?"), tostring(member.displayName or "Worker")),
+                status = member.enabled == false and "OFF"
+                    or (member.inUse == true and "WORKING" or (member.selected == true and "SELECTED" or "AVAILABLE")),
+                info = "Workforce roster member"
             })
         end
     elseif topic == "dashboard" then
@@ -489,7 +492,8 @@ function HelperPayrollMenu:updateContent()
     end
     local tableVisible = self.currentTopic == "workforce" or self.currentTopic == "dashboard" or self.currentTopic == "billing" or self.currentTopic == "roles" or self.currentTopic == "workers" or self.currentTopic == "ledger"
     local editableTopic = self.currentTopic == "billing" or self.currentTopic == "roles" or self.currentTopic == "workers"
-    self:setVisibleSafe(self.tableContainer, tableVisible)
+    self:setVisibleSafe(self.tableContainer, tableVisible and self.currentTopic ~= "workforce")
+    self:setVisibleSafe(self.workforceProfilePanel, self.currentTopic == "workforce")
     self:setVisibleSafe(self.bodyTextElement, not tableVisible)
     self:setVisibleSafe(self.applyButton, editableTopic)
     self:setVisibleSafe(self.discardButton, editableTopic)
@@ -507,15 +511,19 @@ function HelperPayrollMenu:updateContent()
     else
         self:setTextSafe(self.hintText, "HelperPayroll help and operating notes")
     end
-    if self.itemList ~= nil then
-        self.itemList:reloadData()
-        if #self.rows > 0 and self.itemList.setSelectedIndex ~= nil then
-            pcall(function() self.itemList:setSelectedIndex(1, true) end)
+    local activeList = self.currentTopic == "workforce" and self.workforceRosterList or self.itemList
+    if activeList ~= nil then
+        activeList:reloadData()
+        if #self.rows > 0 and activeList.setSelectedIndex ~= nil then
+            local index = math.max(1, math.min(tonumber(self.selectedRowIndex) or 1, #self.rows))
+            pcall(function() activeList:setSelectedIndex(index, true) end)
         end
     end
-    self:setVisibleSafe(self.itemListSliderBox, #self.rows > 14)
+    self:setVisibleSafe(self.itemListSliderBox, self.currentTopic ~= "workforce" and #self.rows > 14)
+    self:setVisibleSafe(self.workforceRosterSliderBox, self.currentTopic == "workforce" and #self.rows > 10)
     self.selectedRow = self.rows[self.selectedRowIndex or 1]
     self:updateSelectedDetails()
+    self:updateMemberProfile()
 end
 
 -- SmoothList data source / delegate
@@ -557,7 +565,37 @@ end
 function HelperPayrollMenu:onListSelectionChanged(list, section, index)
     self.selectedRowIndex = index
     self.selectedRow = self.rows[index]
+    if self.currentTopic == "workforce" and self.selectedRow ~= nil then
+        self.selectedWorkforceSlot = self.selectedRow.slot
+        self:updateMemberProfile()
+    end
     self:updateSelectedDetails()
+end
+
+function HelperPayrollMenu:updateMemberProfile()
+    if self.currentTopic ~= "workforce" then return end
+    local row = self.selectedRow
+    local member = row ~= nil and row.member or nil
+    local snapshot = self.workforceSnapshot or {}
+    local roster = snapshot.roster or {}
+    self:setTextSafe(self.workforceRosterSummary,
+        string.format("%d members  |  %d ON  /  %d OFF",
+            #(snapshot.workers or {}), tonumber(roster.enabledWorkers) or 0, tonumber(roster.disabledWorkers) or 0))
+    self:setTextSafe(self.memberName, member ~= nil and member.displayName or "Select a member")
+    self:setTextSafe(self.memberState, member == nil and "" or
+        (member.enabled == false and "OFF ROSTER" or
+        (member.inUse == true and "WORKING" or "AVAILABLE")) ..
+        (member.selected == true and "  |  SELECTED HELPER" or ""))
+    self:setTextSafe(self.memberRole, member ~= nil and member.roleId or "-")
+    self:setTextSafe(self.memberPayBasis, member ~= nil and
+        (member.payBasis == "daily" and "Per game day" or "Per worked hour") or "-")
+    self:setTextSafe(self.memberPayRate, member ~= nil and
+        string.format("%.2f / %s", tonumber(member.payRate) or 0, member.payBasis == "daily" and "day" or "hr") or "-")
+    self:setTextSafe(self.memberCompensation, member ~= nil and
+        (member.compensationMode == "custom" and "Individual rate" or "Inherits role policy") or "-")
+    self:setTextSafe(self.memberIdentity, member ~= nil and
+        string.format("Helper slot %s  |  Payroll identity: %s",
+            tostring(member.slot or "?"), tostring(member.identityId or "Unavailable")) or "")
 end
 
 function HelperPayrollMenu:getDraftValue(row)
