@@ -572,6 +572,33 @@ function HelperPayrollMenu:onListSelectionChanged(list, section, index)
     self:updateSelectedDetails()
 end
 
+local function profileRoleLabel(roleId)
+    local id = tostring(roleId or "standard")
+    local hp = HelperPayroll
+    local profileId = hp ~= nil and hp.settings ~= nil and hp.settings.activePayrollProfile or "default"
+    if hp ~= nil and type(hp.getWorkerRateById) == "function" then
+        local ok, role = pcall(hp.getWorkerRateById, hp, profileId, id)
+        if ok and type(role) == "table" and role.name ~= nil and tostring(role.name) ~= "" then
+            return tostring(role.name)
+        end
+    end
+    return id
+end
+
+local function profilePayRate(amount, basis)
+    local value = tonumber(amount) or 0
+    local formatted = fmtMoney(value)
+    -- Use the game's currency formatting where available, never assume GBP
+    -- purely from the current save's wage policy.
+    if g_i18n ~= nil and type(g_i18n.formatMoney) == "function" then
+        local ok, text = pcall(g_i18n.formatMoney, g_i18n, value, 2, true, true)
+        if ok and type(text) == "string" and text ~= "" then
+            formatted = text
+        end
+    end
+    return formatted .. (basis == "daily" and " / day" or " / hr")
+end
+
 function HelperPayrollMenu:updateMemberProfile()
     if self.currentTopic ~= "workforce" then return end
     local row = self.selectedRow
@@ -586,16 +613,16 @@ function HelperPayrollMenu:updateMemberProfile()
         (member.enabled == false and "OFF ROSTER" or
         (member.inUse == true and "WORKING" or "AVAILABLE")) ..
         (member.selected == true and "  |  SELECTED HELPER" or ""))
-    self:setTextSafe(self.memberRole, member ~= nil and member.roleId or "-")
+    -- A family/permanent/seasonal relationship is not currently stored. Do
+    -- not infer one from role, payroll rate or availability.
+    self:setTextSafe(self.memberRelationship, member ~= nil and "Not assigned" or "-")
+    self:setTextSafe(self.memberRole, member ~= nil and profileRoleLabel(member.roleId) or "-")
     self:setTextSafe(self.memberPayBasis, member ~= nil and
         (member.payBasis == "daily" and "Per game day" or "Per worked hour") or "-")
     self:setTextSafe(self.memberPayRate, member ~= nil and
-        string.format("%.2f / %s", tonumber(member.payRate) or 0, member.payBasis == "daily" and "day" or "hr") or "-")
+        profilePayRate(member.payRate, member.payBasis) or "-")
     self:setTextSafe(self.memberCompensation, member ~= nil and
         (member.compensationMode == "custom" and "Individual rate" or "Inherits role policy") or "-")
-    self:setTextSafe(self.memberIdentity, member ~= nil and
-        string.format("Helper slot %s  |  Payroll identity: %s",
-            tostring(member.slot or "?"), tostring(member.identityId or "Unavailable")) or "")
 end
 
 function HelperPayrollMenu:getDraftValue(row)
