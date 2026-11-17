@@ -323,7 +323,7 @@ function HelperPayrollMenu:buildRows()
                 value=tostring(member.roleId or "standard"),
                 status=status .. selected,
                 source=string.format("%.2f/%s", tonumber(member.payRate) or 0, member.payBasis == "daily" and "day" or "hr"),
-                info=string.format("Identity: %s | Compensation: %s | Payroll role: %s | Roster: %s. This is a read-only workforce view; use WORKERS and ROLES to change payroll assignments.",
+                info=string.format("Payroll identity: %s | Compensation: %s | Role: %s | Roster: %s. This is read-only; use WORKER PAY or SETTINGS > ROLES to edit.",
                     tostring(member.identityId or "unknown"), tostring(member.compensationMode or "inherit"),
                     tostring(member.roleId or "standard"), tostring(member.rosterState or "unknown"))
             })
@@ -475,6 +475,18 @@ This build remains single-player. Payroll snapshots and farm-scoped job assignme
 end
 
 function HelperPayrollMenu:updateContent()
+    -- Align headings with the meaning of the roster data, not generic payroll diagnostics.
+    if self.currentTopic == "workforce" then
+        self:setTextSafe(self.columnItem, "MEMBER")
+        self:setTextSafe(self.columnValue, "ROLE")
+        self:setTextSafe(self.columnStatus, "AVAILABILITY")
+        self:setTextSafe(self.columnSource, "PAY POLICY")
+    else
+        self:setTextSafe(self.columnItem, "ITEM")
+        self:setTextSafe(self.columnValue, "VALUE")
+        self:setTextSafe(self.columnStatus, "STATUS")
+        self:setTextSafe(self.columnSource, "SOURCE")
+    end
     local tableVisible = self.currentTopic == "workforce" or self.currentTopic == "dashboard" or self.currentTopic == "billing" or self.currentTopic == "roles" or self.currentTopic == "workers" or self.currentTopic == "ledger"
     local editableTopic = self.currentTopic == "billing" or self.currentTopic == "roles" or self.currentTopic == "workers"
     self:setVisibleSafe(self.tableContainer, tableVisible)
