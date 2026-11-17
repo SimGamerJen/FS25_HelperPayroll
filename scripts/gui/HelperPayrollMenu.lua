@@ -7,9 +7,9 @@ HelperPayrollMenu = {}
 
 local HelperPayrollMenu_mt = Class(HelperPayrollMenu, ScreenElement)
 
-local TAB_TEXTS = {"DASHBOARD", "BILLING", "ROLES", "WORKERS", "LEDGER", "HELP"}
-local TAB_TOPICS = {"dashboard", "billing", "roles", "workers", "ledger", "help"}
-local TOPIC_INDEX = {dashboard=1, billing=2, roles=3, workers=4, ledger=5, help=6}
+local TAB_TEXTS = {"DASHBOARD", "BILLING", "ROLES", "WORKERS", "LEDGER", "HELP", "WORKFORCE"}
+local TAB_TOPICS = {"dashboard", "billing", "roles", "workers", "ledger", "help", "workforce"}
+local TOPIC_INDEX = {dashboard=1, billing=2, roles=3, workers=4, ledger=5, help=6, workforce=7}
 
 local function fmtMoney(v)
     return string.format("%.2f", tonumber(v or 0) or 0)
@@ -277,7 +277,34 @@ function HelperPayrollMenu:buildRows()
     local hp = HelperPayroll
     local profileId = (hp ~= nil and hp.settings ~= nil and hp.settings.activePayrollProfile) or self.draftSettings.activePayrollProfile or "default"
 
-    if topic == "dashboard" then
+    if topic == "workforce" then
+        -- Read-only presentation: the payroll snapshot is the authoritative
+        -- source for member identities, roles and employment cost policy.
+        local snapshot = hp ~= nil and hp.getPayrollSnapshot ~= nil
+            and hp:getPayrollSnapshot({includeWorkers=true, includeDisabledWorkers=true}) or {}
+        local roster = snapshot.roster or {}
+        local counts = snapshot.counts or {}
+        rows = {
+            {label="FARM WORKFORCE", value=tostring(counts.managedWorkers or 0) .. " members",
+                status=string.format("%d ON / %d OFF", tonumber(counts.enabledWorkers) or 0, tonumber(counts.disabledWorkers) or 0),
+                source=roster.availabilitySupported == true and "HelperProfiles" or "Standalone payroll",
+                info="Each worker is identified by their permanent helper slot. Relationship and family information are planned, not stored in this build."}
+        }
+        for _, member in ipairs(snapshot.workers or {}) do
+            local status = member.enabled == false and "OFF roster"
+                or (member.inUse == true and "Working" or "Available")
+            local selected = member.selected == true and " | selected" or ""
+            table.insert(rows, {
+                label=string.format("%s  %s", tostring(member.slot or "?"), tostring(member.displayName or "Worker")),
+                value=tostring(member.roleId or "standard"),
+                status=status .. selected,
+                source=string.format("%.2f/%s", tonumber(member.payRate) or 0, member.payBasis == "daily" and "day" or "hr"),
+                info=string.format("Identity: %s | Compensation: %s | Payroll role: %s | Roster: %s. This is a read-only workforce view; use WORKERS and ROLES to change payroll assignments.",
+                    tostring(member.identityId or "unknown"), tostring(member.compensationMode or "inherit"),
+                    tostring(member.roleId or "standard"), tostring(member.rosterState or "unknown"))
+            })
+        end
+    elseif topic == "dashboard" then
         local snapshot = hp ~= nil and hp.getPayrollSnapshot ~= nil and hp:getPayrollSnapshot({includeWorkers=false}) or nil
         local runtime = snapshot ~= nil and snapshot.runtime or {}
         local compatibility = snapshot ~= nil and snapshot.compatibility or {}
@@ -424,14 +451,16 @@ This build remains single-player. Payroll snapshots and farm-scoped job assignme
 end
 
 function HelperPayrollMenu:updateContent()
-    local tableVisible = self.currentTopic == "dashboard" or self.currentTopic == "billing" or self.currentTopic == "roles" or self.currentTopic == "workers" or self.currentTopic == "ledger"
+    local tableVisible = self.currentTopic == "workforce" or self.currentTopic == "dashboard" or self.currentTopic == "billing" or self.currentTopic == "roles" or self.currentTopic == "workers" or self.currentTopic == "ledger"
     local editableTopic = self.currentTopic == "billing" or self.currentTopic == "roles" or self.currentTopic == "workers"
     self:setVisibleSafe(self.tableContainer, tableVisible)
     self:setVisibleSafe(self.bodyTextElement, not tableVisible)
     self:setVisibleSafe(self.applyButton, editableTopic)
     self:setVisibleSafe(self.discardButton, editableTopic)
     self:setTextSafe(self.bodyTextElement, self:buildBodyText())
-    if self.currentTopic == "dashboard" then
+    if self.currentTopic == "workforce" then
+        self:setTextSafe(self.hintText, "Farm Workforce | Select a member for details | Read-only preview; edit wages under WORKERS / ROLES")
+    elseif self.currentTopic == "dashboard" then
         self:setTextSafe(self.hintText, "Live payroll dashboard | Runtime safety, active jobs and pending settlements | Refreshes every second")
     elseif self.currentTopic == "workers" then
         self:setTextSafe(self.hintText, "Worker payroll management | HelperProfiles OFF-roster workers are hidden but their saved payroll data is retained")
@@ -774,6 +803,7 @@ function HelperPayrollMenu:onClickRoles() self:cancelResetConfirmation(); self:s
 function HelperPayrollMenu:onClickWorkers() self:cancelResetConfirmation(); self:showTopic("workers") end
 function HelperPayrollMenu:onClickLedger() self:cancelResetConfirmation(); self:showTopic("ledger") end
 function HelperPayrollMenu:onClickHelp() self:cancelResetConfirmation(); self:showTopic("help") end
+function HelperPayrollMenu:onClickWorkforce() self:cancelResetConfirmation(); self:showTopic("workforce") end
 
 function HelperPayrollMenu:onClickBack()
     self:cancelResetConfirmation()
