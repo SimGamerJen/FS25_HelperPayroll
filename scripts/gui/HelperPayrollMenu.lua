@@ -7,9 +7,19 @@ HelperPayrollMenu = {}
 
 local HelperPayrollMenu_mt = Class(HelperPayrollMenu, ScreenElement)
 
-local TAB_TEXTS = {"DASHBOARD", "BILLING", "ROLES", "WORKERS", "LEDGER", "HELP", "WORKFORCE"}
-local TAB_TOPICS = {"dashboard", "billing", "roles", "workers", "ledger", "help", "workforce"}
-local TOPIC_INDEX = {dashboard=1, billing=2, roles=3, workers=4, ledger=5, help=6, workforce=7}
+-- Three primary areas; all existing edit views remain accessible as subviews.
+local TAB_TEXTS = {"WORKFORCE", "PAYROLL", "SETTINGS"}
+local TAB_TOPICS = {"workforce", "dashboard", "billing"}
+local TOPIC_GROUP = {
+    workforce=1, workers=1,
+    dashboard=2, ledger=2,
+    billing=3, roles=3, help=3
+}
+local SUBVIEWS = {
+    {{"TEAM", "workforce"}, {"WORKER PAY", "workers"}},
+    {{"OVERVIEW", "dashboard"}, {"LEDGER", "ledger"}},
+    {{"BILLING", "billing"}, {"ROLES", "roles"}, {"HELP", "help"}}
+}
 
 local function fmtMoney(v)
     return string.format("%.2f", tonumber(v or 0) or 0)
@@ -34,7 +44,7 @@ end
 function HelperPayrollMenu.new(target, customMt)
     local self = ScreenElement.new(target, customMt or HelperPayrollMenu_mt)
     self.returnScreenName = ""
-    self.currentTopic = "dashboard"
+    self.currentTopic = "workforce"
     self.rows = {}
     self.selectedRowIndex = nil
     self.selectedRow = nil
@@ -104,7 +114,7 @@ function HelperPayrollMenu.show(modDirectory, topic)
     if controller == nil then
         return false
     end
-    controller.currentTopic = topic or controller.currentTopic or "dashboard"
+    controller.currentTopic = topic or controller.currentTopic or "workforce"
     controller:refreshDraftFromRuntime()
     controller:showTopic(controller.currentTopic)
 
@@ -125,7 +135,7 @@ function HelperPayrollMenu:onOpen()
     HelperPayrollMenu:superClass().onOpen(self)
     self:setResetConfirmationArmed(false)
     self:refreshDraftFromRuntime()
-    self:showTopic(self.currentTopic or "dashboard")
+    self:showTopic(self.currentTopic or "workforce")
 end
 
 function HelperPayrollMenu:onClose()
@@ -165,7 +175,7 @@ function HelperPayrollMenu:onGuiSetupFinished()
     end
     self:initialiseEditControls()
     self:refreshDraftFromRuntime()
-    self:showTopic(self.currentTopic or "dashboard")
+    self:showTopic(self.currentTopic or "workforce")
 end
 
 function HelperPayrollMenu:refreshDraftFromRuntime()
@@ -225,15 +235,29 @@ function HelperPayrollMenu:setupTabs()
 end
 
 function HelperPayrollMenu:getActiveTabIndex()
-    return TOPIC_INDEX[self.currentTopic or "dashboard"] or 1
+    return TOPIC_GROUP[self.currentTopic or "workforce"] or 1
 end
 
 function HelperPayrollMenu:updateTabSelection()
-    if self.subCategoryTabs == nil then return end
     local active = self:getActiveTabIndex()
-    for i, tab in ipairs(self.subCategoryTabs) do
+    for i, tab in ipairs(self.subCategoryTabs or {}) do
         if tab ~= nil and tab.setSelected ~= nil then
             pcall(function() tab:setSelected(i == active) end)
+        end
+    end
+
+    local views = SUBVIEWS[active] or {}
+    for i, button in ipairs(self.workforceSubTabs or {}) do
+        local entry = views[i]
+        if button ~= nil then
+            self:setVisibleSafe(button, entry ~= nil)
+            self:setDisabledSafe(button, entry == nil)
+            if entry ~= nil then
+                self:setTextSafe(button, entry[1])
+                if button.setSelected ~= nil then
+                    pcall(function() button:setSelected(entry[2] == self.currentTopic) end)
+                end
+            end
         end
     end
 end
@@ -796,6 +820,18 @@ function HelperPayrollMenu:onPagePrevious()
     if idx < 1 then idx = #TAB_TOPICS end
     self:showTopic(TAB_TOPICS[idx])
 end
+
+function HelperPayrollMenu:onClickSubView(index)
+    self:cancelResetConfirmation()
+    local views = SUBVIEWS[self:getActiveTabIndex()] or {}
+    local entry = views[index]
+    if entry ~= nil then self:showTopic(entry[2]) end
+end
+function HelperPayrollMenu:onClickSubView1() self:onClickSubView(1) end
+function HelperPayrollMenu:onClickSubView2() self:onClickSubView(2) end
+function HelperPayrollMenu:onClickSubView3() self:onClickSubView(3) end
+function HelperPayrollMenu:onClickPayroll() self:cancelResetConfirmation(); self:showTopic("dashboard") end
+function HelperPayrollMenu:onClickSettings() self:cancelResetConfirmation(); self:showTopic("billing") end
 
 function HelperPayrollMenu:onClickDashboard() self:cancelResetConfirmation(); self:showTopic("dashboard") end
 function HelperPayrollMenu:onClickBilling() self:cancelResetConfirmation(); self:showTopic("billing") end
