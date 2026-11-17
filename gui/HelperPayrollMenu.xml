@@ -8,22 +8,24 @@
             <Bitmap profile="fs25_menuHeaderIconBg">
                 <Bitmap profile="fs25_menuHeaderIcon"/>
             </Bitmap>
-            <Text profile="fs25_menuHeaderTitle" id="titleElement" text="HELPER PAYROLL"/>
+            <Text profile="fs25_menuHeaderTitle" id="titleElement" text="FARM WORKFORCE"/>
         </GuiElement>
 
         <BoxLayout profile="fs25_subCategorySelectorTabbedBox" id="subCategoryBox">
-            <Button profile="fs25_subCategorySelectorTabbedTab" id="subCategoryTabs[1]" text="DASHBOARD" onClick="onClickDashboard"><ThreePartBitmap profile="fs25_subCategorySelectorTabbedTabBg" name="background"/></Button>
-            <Button profile="fs25_subCategorySelectorTabbedTab" id="subCategoryTabs[2]" text="BILLING" onClick="onClickBilling"><ThreePartBitmap profile="fs25_subCategorySelectorTabbedTabBg" name="background"/></Button>
-            <Button profile="fs25_subCategorySelectorTabbedTab" id="subCategoryTabs[3]" text="ROLES" onClick="onClickRoles"><ThreePartBitmap profile="fs25_subCategorySelectorTabbedTabBg" name="background"/></Button>
-            <Button profile="fs25_subCategorySelectorTabbedTab" id="subCategoryTabs[4]" text="WORKERS" onClick="onClickWorkers"><ThreePartBitmap profile="fs25_subCategorySelectorTabbedTabBg" name="background"/></Button>
-            <Button profile="fs25_subCategorySelectorTabbedTab" id="subCategoryTabs[5]" text="LEDGER" onClick="onClickLedger"><ThreePartBitmap profile="fs25_subCategorySelectorTabbedTabBg" name="background"/></Button>
-            <Button profile="fs25_subCategorySelectorTabbedTab" id="subCategoryTabs[6]" text="HELP" onClick="onClickHelp"><ThreePartBitmap profile="fs25_subCategorySelectorTabbedTabBg" name="background"/></Button>
-            <Button profile="fs25_subCategorySelectorTabbedTab" id="subCategoryTabs[7]" text="WORKFORCE" onClick="onClickWorkforce"><ThreePartBitmap profile="fs25_subCategorySelectorTabbedTabBg" name="background"/></Button>
+            <Button profile="fs25_subCategorySelectorTabbedTab" id="subCategoryTabs[1]" text="WORKFORCE" onClick="onClickWorkforce"><ThreePartBitmap profile="fs25_subCategorySelectorTabbedTabBg" name="background"/></Button>
+            <Button profile="fs25_subCategorySelectorTabbedTab" id="subCategoryTabs[2]" text="PAYROLL" onClick="onClickPayroll"><ThreePartBitmap profile="fs25_subCategorySelectorTabbedTabBg" name="background"/></Button>
+            <Button profile="fs25_subCategorySelectorTabbedTab" id="subCategoryTabs[3]" text="SETTINGS" onClick="onClickSettings"><ThreePartBitmap profile="fs25_subCategorySelectorTabbedTabBg" name="background"/></Button>
         </BoxLayout>
         <ThreePartBitmap profile="fs25_lineSeparatorTopHighlighted" position="0px -57px"/>
 
         <GuiElement profile="fs25_subCategorySelectorTabbedContainer" id="hpayMainPage">
             <Bitmap position="-20px 150px" size="1525px 615px" imageColor="0.015 0.017 0.015 0.28"/>
+            <!-- Contextual subviews keep specialist controls accessible without crowding the primary navigation. -->
+            <GuiElement id="workforceSubNav" position="0px 68px" size="1480px 46px">
+                <Button profile="hpayActionButton" id="workforceSubTabs[1]" position="0px 0px" size="205px 36px" text="TEAM" onClick="onClickSubView1"/>
+                <Button profile="hpayActionButton" id="workforceSubTabs[2]" position="220px 0px" size="205px 36px" text="WORKER PAY" onClick="onClickSubView2"/>
+                <Button profile="hpayActionButton" id="workforceSubTabs[3]" position="440px 0px" size="205px 36px" text="HELP" onClick="onClickSubView3"/>
+            </GuiElement>
             <Text id="hintText" text="HelperPayroll management | Worker mappings are stored per save | APPLY writes current save payroll settings" position="0px 12px" size="1480px 25px" textSize="15px" textColor="0.55 0.63 0.50 1" textVerticalAlignment="middle" textAlignment="left"/>
 
             <Text id="bodyTextElement" text="" position="40px 150px" size="1480px 585px" textSize="16px" textColor="0.88 0.90 0.86 1" textVerticalAlignment="top" textAlignment="left" textMaxNumLines="36"/>
@@ -60,8 +62,8 @@
         </GuiElement>
 
         <BoxLayout profile="fs25_dialogButtonBox">
-            <Button profile="buttonMenuPrev" text="PREV TAB" onClick="onPagePrevious" id="prevTabButton"/>
-            <Button profile="buttonMenuNext" text="NEXT TAB" onClick="onPageNext" id="nextTabButton"/>
+            <Button profile="buttonMenuPrev" text="PREV AREA" onClick="onPagePrevious" id="prevTabButton"/>
+            <Button profile="buttonMenuNext" text="NEXT AREA" onClick="onPageNext" id="nextTabButton"/>
             <Button profile="buttonExtra1" text="RELOAD SAVE" onClick="onClickReload" id="reloadButton"/>
             <Button profile="hpayActionButton" text="RESET SAVE" onClick="onClickReset" id="resetButton"/>
             <Button profile="buttonBack" text="$l10n_button_back" onClick="onClickBack" id="backButton"/>
