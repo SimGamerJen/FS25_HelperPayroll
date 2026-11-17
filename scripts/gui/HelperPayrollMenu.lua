@@ -255,6 +255,10 @@ function HelperPayrollMenu:updateTabSelection()
     end
 
     local views = SUBVIEWS[active] or {}
+    for i, line in ipairs(self.workforceSubActive or {}) do
+        local entry = views[i]
+        self:setVisibleSafe(line, entry ~= nil and entry[2] == self.currentTopic)
+    end
     for i, button in ipairs(self.workforceSubTabs or {}) do
         local entry = views[i]
         if button ~= nil then
