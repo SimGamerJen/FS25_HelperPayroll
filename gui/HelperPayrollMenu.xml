@@ -18,6 +18,7 @@
             <Button profile="fs25_subCategorySelectorTabbedTab" id="subCategoryTabs[4]" text="WORKERS" onClick="onClickWorkers"><ThreePartBitmap profile="fs25_subCategorySelectorTabbedTabBg" name="background"/></Button>
             <Button profile="fs25_subCategorySelectorTabbedTab" id="subCategoryTabs[5]" text="LEDGER" onClick="onClickLedger"><ThreePartBitmap profile="fs25_subCategorySelectorTabbedTabBg" name="background"/></Button>
             <Button profile="fs25_subCategorySelectorTabbedTab" id="subCategoryTabs[6]" text="HELP" onClick="onClickHelp"><ThreePartBitmap profile="fs25_subCategorySelectorTabbedTabBg" name="background"/></Button>
+            <Button profile="fs25_subCategorySelectorTabbedTab" id="subCategoryTabs[7]" text="WORKFORCE" onClick="onClickWorkforce"><ThreePartBitmap profile="fs25_subCategorySelectorTabbedTabBg" name="background"/></Button>
         </BoxLayout>
         <ThreePartBitmap profile="fs25_lineSeparatorTopHighlighted" position="0px -57px"/>
 
