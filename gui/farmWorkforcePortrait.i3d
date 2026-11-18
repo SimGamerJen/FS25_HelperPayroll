@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<i3D name="farmWorkforcePortrait" version="1.6" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://i3d.giants.ch/schema/i3d-1.6.xsd">
+  <Asset>
+    <Export program="GIANTS Editor" version="10.0.0"/>
+  </Asset>
+  <Files/>
+  <Materials/>
+  <Shapes/>
+  <Scene>
+    <TransformGroup name="farmWorkforcePortraitRoot" nodeId="1">
+      <TransformGroup name="previewActor" nodeId="2"/>
+      <Camera name="previewCamera" translation="0 1.63 1.25" rotation="-4 0 0" fov="32" nearClip="0.05" farClip="20" nodeId="3"/>
+      <Light name="softPortraitLight" type="directional" rotation="-22 30 0" color="0.92 0.93 0.94" emitDiffuse="true" emitSpecular="true" castShadowMap="false" objectMask="0x4000000" nodeId="4"/>
+      <Light name="portraitFill" type="directional" rotation="5 -65 0" color="0.32 0.38 0.38" emitDiffuse="true" emitSpecular="false" castShadowMap="false" objectMask="0x4000000" nodeId="5"/>
+    </TransformGroup>
+  </Scene>
+</i3D>
