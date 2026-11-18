@@ -594,11 +594,11 @@ Planned work includes:
 - Optional rostered-day policies distinct from worked-day daily compensation.
 - Continued reporting, localisation, and usability improvements.
 
-## Permissions
+## Licence and Permissions
 
 Copyright © 2026 SimGamerJen. All rights reserved.
 
-Editing, redistributing, re-uploading, repackaging, or publishing modified versions of this mod is prohibited without prior written permission from SimGamerJen.
+You may download and use this mod for personal use. You may not modify, redistribute, re-upload, or publish this mod, in whole or in part, or any derivative version without prior written permission from SimGamerJen.
 
 The presence of source files in this repository does not grant permission to publish or redistribute derivative versions.
 
