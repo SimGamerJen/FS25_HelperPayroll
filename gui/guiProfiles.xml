@@ -179,4 +179,11 @@
         <clickSound value="DEFAULT_CLICK"/>
         <sendActionOnRelease value="true"/>
     </Profile>
+    <!-- Native FS25 RenderElement. Scene and style are supplied by the
+         experimental local portrait controller only when a style exists. -->
+    <Profile name="hpayMemberPortrait" extends="baseReference" with="anchorTopLeft">
+        <size value="200px 152px"/>
+        <cameraNode value="0|1"/>
+        <superSamplingFactor value="1"/>
+    </Profile>
 </GUIProfiles>
