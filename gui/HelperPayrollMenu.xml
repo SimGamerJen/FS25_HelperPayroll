@@ -56,7 +56,8 @@
                 <GuiElement id="memberDetailsLayout" position="0px -400px" size="1480px 545px">
                     <Text profile="hpayDetailsHeader" position="540px 479px" size="850px 32px" text="PERSONAL PROFILE"/>
                     <Text profile="hpayDetailsTitle" id="memberInitials" position="540px 404px" size="62px 44px" text="?" textAlignment="center" textVerticalAlignment="middle"/>
-                    <Text profile="hpayDetailsTitle" id="memberName" position="620px 425px" size="770px 53px" text="Select a member"/>
+                    <Text profile="hpayDetailsTitle" id="memberName" position="620px 425px" size="545px 53px" text="Select a member"/>
+                    <Render profile="hpayMemberPortrait" id="memberPortraitRender" position="1185px 356px" visible="false"/>
                     <Text profile="hpayDetailsLabel" id="memberState" position="620px 386px" size="770px 32px" text=""/>
                     <Text profile="hpayDetailsLabel" id="memberAppearance" position="620px 348px" size="770px 27px" text="Appearance: Not linked"/>
                     <Bitmap position="540px 326px" size="860px 2px" imageColor="0.50 0.72 0.10 0.65"/>
