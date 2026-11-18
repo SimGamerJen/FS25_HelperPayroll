@@ -48,6 +48,7 @@ function HelperPayrollMenu.new(target, customMt)
     self.rows = {}
     self.selectedRowIndex = nil
     self.selectedWorkforceSlot = nil
+    self.memberPortrait = nil
     self.selectedRow = nil
     self.draftSettings = {}
     self.draftRolePolicies = {}
@@ -135,17 +136,29 @@ end
 function HelperPayrollMenu:onOpen()
     HelperPayrollMenu:superClass().onOpen(self)
     self:setResetConfirmationArmed(false)
+    if self.memberPortrait == nil and self.memberPortraitRender ~= nil
+        and FarmWorkforcePortrait ~= nil then
+        self.memberPortrait = FarmWorkforcePortrait.new(
+            self.memberPortraitRender, HelperPayroll ~= nil and HelperPayroll.MOD_DIRECTORY or "")
+    end
     self:refreshDraftFromRuntime()
     self:showTopic(self.currentTopic or "workforce")
 end
 
 function HelperPayrollMenu:onClose()
     self:setResetConfirmationArmed(false)
+    if self.memberPortrait ~= nil then
+        self.memberPortrait:destroy()
+        self.memberPortrait = nil
+    end
     HelperPayrollMenu:superClass().onClose(self)
 end
 
 function HelperPayrollMenu:update(dt)
     HelperPayrollMenu:superClass().update(self, dt)
+    if self.currentTopic == "workforce" and self.memberPortrait ~= nil then
+        self.memberPortrait:update(dt)
+    end
     if self.currentTopic ~= "dashboard" and self.currentTopic ~= "workforce" then return end
 
     self.liveRefreshAccumulatorMs = (tonumber(self.liveRefreshAccumulatorMs) or 0) + (tonumber(dt) or 0)
@@ -300,6 +313,9 @@ end
 
 function HelperPayrollMenu:showTopic(topic)
     self.currentTopic = topic or "dashboard"
+    if self.currentTopic ~= "workforce" and self.memberPortrait ~= nil then
+        self.memberPortrait:showSlot(nil)
+    end
     self:updateTabSelection()
     self.selectedRowIndex = 1
     self.selectedRow = nil
@@ -668,6 +684,9 @@ function HelperPayrollMenu:updateMemberProfile()
         end
     end
     self:setTextSafe(self.memberAppearance, member ~= nil and ("Appearance: " .. appearance) or "")
+    if self.memberPortrait ~= nil then
+        self.memberPortrait:showSlot(member ~= nil and member.slot or nil)
+    end
     self:setTextSafe(self.memberRole, member ~= nil and profileRoleLabel(member.roleId) or "-")
     self:setTextSafe(self.memberPayBasis, member ~= nil and
         (member.payBasis == "daily" and "Per game day" or "Per worked hour") or "-")
