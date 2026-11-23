@@ -22,12 +22,10 @@
             <Bitmap position="-20px 150px" size="1525px 615px" imageColor="0.015 0.017 0.015 0.28"/>
             <!-- Contextual subviews keep specialist controls accessible without crowding the primary navigation. -->
             <GuiElement id="workforceSubNav" position="0px 685px" size="1480px 46px">
-                <Button profile="hpayActionButton" id="workforceSubTabs[1]" position="0px 0px" size="205px 36px" text="TEAM" onClick="onClickSubView1"/>
-                <Button profile="hpayActionButton" id="workforceSubTabs[2]" position="220px 0px" size="205px 36px" text="WORKER PAY" onClick="onClickSubView2"/>
-                <Button profile="hpayActionButton" id="workforceSubTabs[3]" position="440px 0px" size="205px 36px" text="HELP" onClick="onClickSubView3"/>
-                <Bitmap id="workforceSubActive[1]" position="22px -6px" size="160px 3px" imageColor="0.68 0.96 0.08 1" visible="false"/>
-                <Bitmap id="workforceSubActive[2]" position="242px -6px" size="160px 3px" imageColor="0.68 0.96 0.08 1" visible="false"/>
-                <Bitmap id="workforceSubActive[3]" position="462px -6px" size="160px 3px" imageColor="0.68 0.96 0.08 1" visible="false"/>
+                <!-- Native FS25 tab backgrounds, with existing selection logic driving the active state. -->
+                <Button profile="fs25_subCategorySelectorTabbedTab" id="workforceSubTabs[1]" position="0px 0px" size="205px 36px" text="TEAM" onClick="onClickSubView1"><ThreePartBitmap profile="fs25_subCategorySelectorTabbedTabBg" name="background"/></Button>
+                <Button profile="fs25_subCategorySelectorTabbedTab" id="workforceSubTabs[2]" position="220px 0px" size="205px 36px" text="WORKER PAY" onClick="onClickSubView2"><ThreePartBitmap profile="fs25_subCategorySelectorTabbedTabBg" name="background"/></Button>
+                <Button profile="fs25_subCategorySelectorTabbedTab" id="workforceSubTabs[3]" position="440px 0px" size="205px 36px" text="HELP" onClick="onClickSubView3"><ThreePartBitmap profile="fs25_subCategorySelectorTabbedTabBg" name="background"/></Button>
             </GuiElement>
             <Text id="hintText" text="HelperPayroll management | Worker mappings are stored per save | APPLY writes current save payroll settings" position="0px 12px" size="1480px 25px" textSize="15px" textColor="0.55 0.63 0.50 1" textVerticalAlignment="middle" textAlignment="left"/>
 
