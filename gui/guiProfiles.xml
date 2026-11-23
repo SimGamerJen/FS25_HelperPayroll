@@ -158,6 +158,18 @@
         <imagePressedColor value="$preset_fs25_colorMainHighlight"/>
     </Profile>
 
+    <!-- The engine's native subCategory tab normally autosizes to its text.
+         Prevent width drift when changing between TEAM / WORKER PAY,
+         OVERVIEW / LEDGER, and BILLING / ROLES / HELP. -->
+    <Profile name="hpayFixedSubTab" extends="fs25_subCategorySelectorTabbedTab">
+        <size value="205px 36px"/>
+        <fitToContent value="false"/>
+        <textAutoWidth value="false"/>
+        <textAutoHeight value="false"/>
+        <textAlignment value="center"/>
+        <textVerticalAlignment value="middle"/>
+    </Profile>
+
     <Profile name="hpayActionButton" extends="buttonBase" with="anchorTopLeft">
         <size value="190px 36px"/>
         <textSize value="14px"/>
